@@ -1,10 +1,10 @@
-import { OAuth2Client } from 'google-auth-library';
+import GoogleAuth, { GoogleKey } from 'cloudflare-workers-and-google-oauth';
 import { Router, IRequest } from 'itty-router';
 
 // --- Environment Variable Typings ---
 export interface Env {
-    GOOGLE_OAUTH_CREDS_JSON: string;
-    GEMINI_PROJECT_ID?: string;
+	GCP_SERVICE_ACCOUNT: string;
+	GEMINI_PROJECT_ID?: string;
 }
 
 // --- Model Information (from your prompt) ---
@@ -151,79 +151,48 @@ const geminiCliModels: Record<string, ModelInfo> = {
 const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com';
 const CODE_ASSIST_API_VERSION = 'v1internal';
 
-// OAuth configuration for the public Gemini CLI tool
-const OAUTH_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
-const OAUTH_CLIENT_SECRET = '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';
-const OAUTH_REDIRECT_URI = 'http://localhost:45289'; // Dummy redirect for non-web flow
-
-/**
- * Represents the structure of the OAuth credentials JSON file.
- */
-interface OAuthCredentials {
-    access_token: string;
-    refresh_token: string;
-    scope: string;
-    token_type: string;
-    expiry_date: number;
-}
-
 /**
  * This class is a direct adaptation of the GeminiCliHandler from the provided code,
  * modified to run in a Cloudflare Worker environment. It handles authentication
  * and communication with Google's Code Assist API, which powers the Gemini CLI.
+ * It now uses service account credentials via `cloudflare-workers-and-google-oauth`.
  */
 class GeminiCliHandler {
     private env: Env;
-    private authClient: OAuth2Client;
+    private accessToken: string | null = null;
     private projectId: string | null = null;
-    private authInitialized: boolean = false;
 
     constructor(env: Env) {
         this.env = env;
-        this.authClient = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI);
     }
 
     /**
-     * Loads OAuth credentials from the environment variable instead of the filesystem.
+     * Initializes authentication by obtaining an OAuth token using the service account.
      */
-    private async loadOAuthCredentials(): Promise<OAuthCredentials> {
-        if (!this.env.GOOGLE_OAUTH_CREDS_JSON) {
-            throw new Error('`GOOGLE_OAUTH_CREDS_JSON` environment variable not set.');
+    private async initializeAuth(): Promise<void> {
+        if (this.accessToken) {
+            // This is a simplified auth flow. A more robust implementation would check
+            // for token expiry before re-fetching.
+            return;
         }
+
+        if (!this.env.GCP_SERVICE_ACCOUNT) {
+            throw new Error('`GCP_SERVICE_ACCOUNT` environment variable not set. Please provide a service account JSON.');
+        }
+
         try {
-            return JSON.parse(this.env.GOOGLE_OAUTH_CREDS_JSON);
-        } catch (err) {
-            throw new Error('Failed to parse `GOOGLE_OAUTH_CREDS_JSON`. Please ensure it is a valid JSON string.');
-        }
-    }
-
-    /**
-     * Initializes the OAuth client with credentials and refreshes the token if necessary.
-     */
-    private async initializeAuth(forceRefresh: boolean = false): Promise<void> {
-        if (this.authInitialized && !forceRefresh) {
-            const creds = this.authClient.credentials;
-            if (creds && creds.expiry_date && Date.now() < creds.expiry_date - 60000) {
-                return; // Token is valid
+            const serviceAccount: GoogleKey = JSON.parse(this.env.GCP_SERVICE_ACCOUNT);
+            const scopes = ['https://www.googleapis.com/auth/cloud-platform'];
+            const oauth = new GoogleAuth(serviceAccount, scopes);
+            const token = await oauth.getGoogleAuthToken();
+            if (!token) {
+                throw new Error('Authentication failed: could not retrieve Google Auth token.');
             }
+            this.accessToken = token;
+        } catch (e: any) {
+            console.error("Failed to parse GCP_SERVICE_ACCOUNT or get auth token.", e);
+            throw new Error("Invalid GCP_SERVICE_ACCOUNT credentials or authentication failed.");
         }
-
-        const credentials = await this.loadOAuthCredentials();
-        this.authClient.setCredentials(credentials);
-
-        // If token is expired or close to expiring, refresh it
-        const isExpired = credentials.expiry_date ? Date.now() >= credentials.expiry_date - 60000 : true;
-        if (isExpired && credentials.refresh_token) {
-            try {
-                await this.authClient.refreshAccessToken();
-                // In a real app, you might want to save the new credentials, but for a serverless
-                // function, we'll just use the refreshed token for this invocation.
-            } catch (error) {
-                console.error(`[GeminiCLI] Failed to refresh token:`, error);
-                // Proceed with the expired token; the API call might still work or will fail with a 401.
-            }
-        }
-        this.authInitialized = true;
     }
 
     /**
@@ -237,8 +206,6 @@ class GeminiCliHandler {
             return this.projectId;
         }
 
-        // This discovery logic is ported from the original file.
-        // It's complex and makes extra API calls. Providing GEMINI_PROJECT_ID is recommended.
         try {
             const initialProjectId = 'default-project';
             const loadResponse = await this.callEndpoint('loadCodeAssist', {
@@ -258,29 +225,34 @@ class GeminiCliHandler {
     }
 
     /**
-     * A generic method to call a Code Assist API endpoint with automatic auth refresh on 401.
+     * A generic method to call a Code Assist API endpoint.
      */
-    private async callEndpoint(method: string, body: any, retryAuth: boolean = true): Promise<any> {
-        try {
-            const res = await this.authClient.request({
-                url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`,
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            return res.data;
-        } catch (error: any) {
-            if (error.response?.status === 401 && retryAuth) {
-                await this.initializeAuth(true); // Force refresh
-                return this.callEndpoint(method, body, false); // Retry once
+    private async callEndpoint(method: string, body: any, isRetry: boolean = false): Promise<any> {
+        await this.initializeAuth();
+
+        const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.accessToken}`,
+            },
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            if (response.status === 401 && !isRetry) {
+                this.accessToken = null; // Clear token to force re-auth
+                return this.callEndpoint(method, body, true); // Retry once
             }
-            throw error;
+            const errorText = await response.text();
+            throw new Error(`API call failed with status ${response.status}: ${errorText}`);
         }
+
+        return response.json();
     }
 
     /**
      * Parses a server-sent event (SSE) stream from the Gemini API.
-     * This is a web-compatible implementation using ReadableStream and TextDecoderStream.
      */
     private async *parseSSEStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<any> {
         const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
@@ -333,7 +305,6 @@ class GeminiCliHandler {
             parts: [{ text: msg.content }],
         }));
 
-        // The original code prepends the system prompt as a 'user' message.
         if (systemPrompt) {
             contents.unshift({ role: 'user', parts: [{ text: systemPrompt }] });
         }
@@ -344,22 +315,32 @@ class GeminiCliHandler {
             request: {
                 contents: contents,
                 generationConfig: {
-                    temperature: 0.7, // Example value
-                    maxOutputTokens: 8192, // Example value
+                    temperature: 0.7,
+                    maxOutputTokens: 8192,
                 },
             },
         };
 
-        const response = await this.authClient.request<ReadableStream>({
-            url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent`,
+        const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
             method: 'POST',
-            params: { alt: 'sse' },
-            headers: { 'Content-Type': 'application/json' },
-            responseType: 'stream',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.accessToken}`,
+            },
             body: JSON.stringify(streamRequest),
         });
 
-        for await (const jsonData of this.parseSSEStream(response.data)) {
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[GeminiCLI] Stream request failed: ${response.status}`, errorText);
+            throw new Error(`Stream request failed: ${response.status}`);
+        }
+
+        if (!response.body) {
+            throw new Error("Response has no body");
+        }
+
+        for await (const jsonData of this.parseSSEStream(response.body)) {
             const candidate = jsonData.response?.candidates?.[0];
             if (candidate?.content?.parts?.[0]?.text) {
                 const content = candidate.content.parts[0].text;
@@ -447,9 +428,14 @@ router.get('/v1/models', () => {
 });
 
 
+interface ChatCompletionRequest {
+    model: string;
+    messages: { role: string; content: string }[];
+}
+
 router.post('/v1/chat/completions', async (request: IRequest, env: Env) => {
     try {
-        const body = await request.json();
+        const body = await request.json<ChatCompletionRequest>();
         const model = body.model || 'gemini-1.5-flash-001'; // Default model
         const messages = body.messages || [];
 
