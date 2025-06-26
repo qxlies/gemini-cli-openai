@@ -409,7 +409,7 @@ function createOpenAIStreamTransformer(model: string): TransformStream<any, Uint
 const router = Router();
 
 // NEW: Add the /v1/models endpoint
-router.get('/v1/models', () => {
+router.get('/v1/models', async () => {
     const modelData = Object.keys(geminiCliModels).map((modelId) => ({
         id: modelId,
         object: 'model',
