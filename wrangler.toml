@@ -16,3 +16,7 @@ compatibility_flags = ["nodejs_compat"] # Required for the 'google-auth-library'
 # # Providing this skips the automatic discovery process, making the worker faster and more reliable.
 # # If omitted, the worker will attempt to discover it on the first run.
 # GEMINI_PROJECT_ID = "your-google-cloud-project-id"
+
+# wrangler.toml (wrangler v3.88.0^)
+[observability.logs]
+enabled = true
