@@ -1,7 +1,7 @@
 name = "gemini-cli-worker"
 main = "src/index.ts"
 compatibility_date = "2024-06-20"
-node_compat = true # Required for the 'google-auth-library'
+nodejs_compat = true # Required for the 'google-auth-library'
 
 # --- Environment Variables ---
 # [vars]
