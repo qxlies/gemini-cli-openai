@@ -1,5 +1,5 @@
+import { Hono } from 'hono';
 import GoogleAuth, { GoogleKey } from 'cloudflare-workers-and-google-oauth';
-import { Router, IRequest } from 'itty-router';
 
 // --- Environment Variable Typings ---
 export interface Env {
@@ -405,11 +405,11 @@ function createOpenAIStreamTransformer(model: string): TransformStream<any, Uint
     });
 }
 
-// --- Main Worker Logic with Itty Router ---
-const router = Router();
+// --- Main Worker Logic with Hono ---
+const app = new Hono<{ Bindings: Env }>();
 
 // NEW: Add the /v1/models endpoint
-router.get('/v1/models', async () => {
+app.get('/v1/models', async (c) => {
     const modelData = Object.keys(geminiCliModels).map((modelId) => ({
         id: modelId,
         object: 'model',
@@ -422,9 +422,7 @@ router.get('/v1/models', async () => {
         data: modelData,
     };
 
-    return new Response(JSON.stringify(responsePayload), {
-        headers: { 'Content-Type': 'application/json' },
-    });
+    return c.json(responsePayload);
 });
 
 
@@ -433,14 +431,14 @@ interface ChatCompletionRequest {
     messages: { role: string; content: string }[];
 }
 
-router.post('/v1/chat/completions', async (request: IRequest, env: Env) => {
+app.post('/v1/chat/completions', async (c) => {
     try {
-        const body = await request.json<ChatCompletionRequest>();
+        const body = await c.req.json<ChatCompletionRequest>();
         const model = body.model || 'gemini-1.5-flash-001'; // Default model
         const messages = body.messages || [];
 
         if (!messages.length) {
-            return new Response(JSON.stringify({ error: 'messages is a required field' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            return c.json({ error: 'messages is a required field' }, 400);
         }
 
         // Extract system prompt and user/assistant messages
@@ -453,7 +451,7 @@ router.post('/v1/chat/completions', async (request: IRequest, env: Env) => {
             return true;
         });
 
-        const handler = new GeminiCliHandler(env);
+        const handler = new GeminiCliHandler(c.env);
         const geminiStream = handler.streamContent(model, systemPrompt, otherMessages);
 
         // Create a readable stream for the response
@@ -483,16 +481,8 @@ router.post('/v1/chat/completions', async (request: IRequest, env: Env) => {
         });
     } catch (e: any) {
         console.error(e);
-        return new Response(JSON.stringify({ error: e.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return c.json({ error: e.message }, 500);
     }
 });
 
-// Catch-all for 404s
-router.all('*', () => new Response('Not Found.', { status: 404 }));
-
-export default {
-    fetch: router.handle,
-};
+export default app;
