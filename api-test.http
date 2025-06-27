@@ -1,0 +1,138 @@
+### Test the /v1/models endpoint
+GET https://gemini-cli-worker.gewoonjaap.workers.dev/v1/models
+Content-Type: application/json
+
+###
+
+### Test token authentication only
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/token-test
+Content-Type: application/json
+
+###
+
+### Test authentication and basic functionality
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/test
+Content-Type: application/json
+
+###
+
+### Test chat completions with gemini-2.5-flash (simple message)
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-2.5-flash",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! Can you tell me about yourself?"
+    }
+  ]
+}
+
+###
+
+### Test chat completions with system prompt
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-2.5-pro",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful coding assistant. Always provide clear and concise explanations."
+    },
+    {
+      "role": "user",
+      "content": "Explain what TypeScript is in simple terms."
+    }
+  ]
+}
+
+###
+
+### Test chat completions with conversation history
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-2.0-flash-001",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    },
+    {
+      "role": "assistant",
+      "content": "The capital of France is Paris."
+    },
+    {
+      "role": "user",
+      "content": "What's the population of that city?"
+    }
+  ]
+}
+
+###
+
+### Test with gemini-2.0-flash-thinking model
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-2.0-flash-thinking-exp-01-21",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Solve this step by step: If a train travels 120 km in 1.5 hours, what is its average speed?"
+    }
+  ]
+}
+
+###
+
+### Test with experimental model
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-exp-1206",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a creative writing assistant."
+    },
+    {
+      "role": "user",
+      "content": "Write a short poem about coding in TypeScript."
+    }
+  ]
+}
+
+###
+
+### Test error handling - invalid model
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "invalid-model-name",
+  "messages": [
+    {
+      "role": "user",
+      "content": "This should fail with an invalid model."
+    }
+  ]
+}
+
+###
+
+### Test error handling - empty messages
+POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-2.5-flash",
+  "messages": []
+}
