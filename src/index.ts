@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Env } from './types';
-import { setupOpenAIRoutes } from './routes/openai';
-import { setupDebugRoutes } from './routes/debug';
+import { OpenAIRoute } from './routes/openai';
+import { DebugRoute } from './routes/debug';
 
 /**
  * Gemini CLI OpenAI Worker
@@ -36,8 +36,11 @@ app.use('*', async (c, next) => {
 });
 
 // Setup route handlers
-setupOpenAIRoutes(app);
-setupDebugRoutes(app);
+app.route('/v1', OpenAIRoute);
+app.route('/v1/debug', DebugRoute);
+
+// Add individual debug routes to main app for backward compatibility
+app.route('/v1', DebugRoute);
 
 // Root endpoint - basic info about the service
 app.get('/', (c) => {
