@@ -169,7 +169,7 @@ class GeminiCliHandler {
     /**
      * Initializes authentication by obtaining an OAuth token using the service account.
      */
-    private async initializeAuth(): Promise<void> {
+    public async initializeAuth(): Promise<void> {
         if (this.accessToken) {
             // This is a simplified auth flow. A more robust implementation would check
             // for token expiry before re-fetching.
@@ -198,7 +198,7 @@ class GeminiCliHandler {
     /**
      * Discovers the Google Cloud project ID. Uses the environment variable if provided.
      */
-    private async discoverProjectId(): Promise<string> {
+    public async discoverProjectId(): Promise<string> {
         if (this.env.GEMINI_PROJECT_ID) {
             return this.env.GEMINI_PROJECT_ID;
         }
@@ -433,9 +433,12 @@ interface ChatCompletionRequest {
 
 app.post('/v1/chat/completions', async (c) => {
     try {
+        console.log('Chat completions request received');
         const body = await c.req.json<ChatCompletionRequest>();
         const model = body.model || 'gemini-1.5-flash-001'; // Default model
         const messages = body.messages || [];
+
+        console.log('Request body parsed:', { model, messageCount: messages.length });
 
         if (!messages.length) {
             return c.json({ error: 'messages is a required field' }, 400);
@@ -451,8 +454,18 @@ app.post('/v1/chat/completions', async (c) => {
             return true;
         });
 
+        console.log('System prompt extracted:', !!systemPrompt);
+
         const handler = new GeminiCliHandler(c.env);
-        const geminiStream = handler.streamContent(model, systemPrompt, otherMessages);
+        
+        // Test basic auth first
+        try {
+            await handler.initializeAuth();
+            console.log('Authentication successful');
+        } catch (authError: any) {
+            console.error('Authentication failed:', authError.message);
+            return c.json({ error: 'Authentication failed: ' + authError.message }, 401);
+        }
 
         // Create a readable stream for the response
         const { readable, writable } = new TransformStream();
@@ -462,26 +475,71 @@ app.post('/v1/chat/completions', async (c) => {
 
         // Asynchronously pipe the data from Gemini to our transformer
         (async () => {
-            for await (const chunk of geminiStream) {
-                await writer.write(chunk);
+            try {
+                console.log('Starting stream generation');
+                const geminiStream = handler.streamContent(model, systemPrompt, otherMessages);
+                
+                for await (const chunk of geminiStream) {
+                    console.log('Received chunk:', chunk.type);
+                    await writer.write(chunk);
+                }
+                console.log('Stream completed successfully');
+                await writer.close();
+            } catch (streamError: any) {
+                console.error('Stream error:', streamError.message);
+                // Try to write an error chunk before closing
+                await writer.write({
+                    type: 'text',
+                    data: `Error: ${streamError.message}`
+                });
+                await writer.close();
             }
-            await writer.close();
-        })().catch(async (err) => {
-            console.error('Error during streaming:', err);
-            await writer.abort(err);
-        });
+        })();
 
         // Return the streaming response
+        console.log('Returning streaming response');
         return new Response(openAIStream, {
             headers: {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
-                Connection: 'keep-alive',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             },
         });
     } catch (e: any) {
-        console.error(e);
+        console.error('Top-level error:', e);
         return c.json({ error: e.message }, 500);
+    }
+});
+
+// Test endpoint for debugging
+app.post('/v1/test', async (c) => {
+    try {
+        console.log('Test endpoint called');
+        const handler = new GeminiCliHandler(c.env);
+        
+        // Test authentication
+        await handler.initializeAuth();
+        console.log('Auth test passed');
+        
+        // Test project discovery
+        const projectId = await handler.discoverProjectId();
+        console.log('Project discovery test passed:', projectId);
+        
+        return c.json({ 
+            status: 'ok', 
+            message: 'Authentication and project discovery successful',
+            projectId: projectId
+        });
+    } catch (e: any) {
+        console.error('Test endpoint error:', e);
+        return c.json({ 
+            status: 'error', 
+            message: e.message,
+            stack: e.stack 
+        }, 500);
     }
 });
 
