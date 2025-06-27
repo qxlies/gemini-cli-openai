@@ -172,8 +172,8 @@ export class AuthManager {
                     cached_at: new Date(tokenData.cached_at).toISOString(),
                     expires_at: new Date(tokenData.expiry_date).toISOString(),
                     time_until_expiry_seconds: Math.floor(timeUntilExpiry / 1000),
-                    is_expired: timeUntilExpiry < 0,
-                    token_preview: tokenData.access_token.substring(0, 20) + '...'
+                    is_expired: timeUntilExpiry < 0
+                    // Removed token_preview for security
                 };
             }
             return { cached: false, message: 'No token found in cache' };

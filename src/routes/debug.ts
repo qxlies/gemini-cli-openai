@@ -14,10 +14,19 @@ DebugRoute.get('/cache', async (c) => {
         const authManager = new AuthManager(c.env);
         const cacheInfo = await authManager.getCachedTokenInfo();
         
-        return c.json({
+        // Remove sensitive information from the response
+        const sanitizedInfo = {
             status: 'ok',
-            ...cacheInfo
-        });
+            cached: cacheInfo.cached,
+            cached_at: cacheInfo.cached_at,
+            expires_at: cacheInfo.expires_at,
+            time_until_expiry_seconds: cacheInfo.time_until_expiry_seconds,
+            is_expired: cacheInfo.is_expired,
+            message: cacheInfo.message,
+            // Explicitly exclude token_preview and any other sensitive data
+        };
+        
+        return c.json(sanitizedInfo);
     } catch (e: any) {
         return c.json({
             status: 'error',
@@ -44,8 +53,8 @@ DebugRoute.post('/token-test', async (c) => {
         console.error('Token test error:', e);
         return c.json({ 
             status: 'error', 
-            message: e.message,
-            stack: e.stack 
+            message: 'Token authentication failed'
+            // Removed stack trace for security
         }, 500);
     }
 });
@@ -63,19 +72,20 @@ DebugRoute.post('/test', async (c) => {
         
         // Test project discovery
         const projectId = await geminiClient.discoverProjectId();
-        console.log('Project discovery test passed:', projectId);
+        console.log('Project discovery test passed');
         
         return c.json({ 
             status: 'ok', 
             message: 'Authentication and project discovery successful',
-            projectId: projectId
+            project_available: !!projectId
+            // Removed actual projectId for security
         });
     } catch (e: any) {
         console.error('Test endpoint error:', e);
         return c.json({ 
             status: 'error', 
-            message: e.message,
-            stack: e.stack 
+            message: 'Authentication or project discovery failed'
+            // Removed stack trace and detailed error message for security
         }, 500);
     }
 });

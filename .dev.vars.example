@@ -1,1 +1,13 @@
-GCP_SERVICE_ACCOUNT=JSON_HERE
+# Gemini CLI OpenAI Worker Environment Variables
+
+# Required: OAuth2 credentials JSON from Gemini CLI authentication
+# Get this by running `gemini auth` and copying the contents of ~/.gemini/oauth_creds.json
+GCP_SERVICE_ACCOUNT={"access_token":"ya29.a0AS3H6Nx...","refresh_token":"1//09FtpJYpxOd...","scope":"https://www.googleapis.com/auth/cloud-platform ...","token_type":"Bearer","id_token":"eyJhbGciOiJSUzI1NiIs...","expiry_date":1750927763467}
+
+# Optional: Google Cloud Project ID (auto-discovered if not set)
+# GEMINI_PROJECT_ID=your-project-id
+
+# Optional: API key for authentication (if not set, API is public)
+# When set, clients must include "Authorization: Bearer <your-api-key>" header
+# Example: sk-1234567890abcdef1234567890abcdef
+OPENAI_API_KEY=sk-your-secret-api-key-here

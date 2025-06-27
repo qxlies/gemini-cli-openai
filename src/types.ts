@@ -3,6 +3,7 @@ export interface Env {
 	GCP_SERVICE_ACCOUNT: string; // Now contains OAuth2 credentials JSON
 	GEMINI_PROJECT_ID?: string;
 	GEMINI_CLI_KV: KVNamespace; // Cloudflare KV for token caching
+	OPENAI_API_KEY?: string; // Optional API key for authentication
 }
 
 // --- OAuth2 Credentials Interface ---

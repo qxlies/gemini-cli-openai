@@ -115,12 +115,22 @@ Note the namespace ID returned and update `wrangler.toml`.
 
 Create a `.dev.vars` file:
 ```bash
+# Required: OAuth2 credentials JSON from Gemini CLI authentication
 GCP_SERVICE_ACCOUNT={"access_token":"ya29...","refresh_token":"1//...","scope":"...","token_type":"Bearer","id_token":"eyJ...","expiry_date":1750927763467}
+
+# Optional: Google Cloud Project ID (auto-discovered if not set)
+# GEMINI_PROJECT_ID=your-project-id
+
+# Optional: API key for authentication (if not set, API is public)
+# When set, clients must include "Authorization: Bearer <your-api-key>" header
+# Example: sk-1234567890abcdef1234567890abcdef
+OPENAI_API_KEY=sk-your-secret-api-key-here
 ```
 
-For production, set the secret:
+For production, set the secrets:
 ```bash
 wrangler secret put GCP_SERVICE_ACCOUNT
+wrangler secret put OPENAI_API_KEY  # Optional, only if you want authentication
 ```
 
 ### Step 4: Deploy
@@ -223,7 +233,7 @@ from openai import OpenAI
 # Initialize with your worker endpoint
 client = OpenAI(
     base_url="https://your-worker.workers.dev/v1",
-    api_key="dummy-key"  # Not used but required by SDK
+    api_key="sk-your-secret-api-key-here"  # Use your OPENAI_API_KEY if authentication is enabled
 )
 
 # Chat completion
@@ -247,7 +257,7 @@ import OpenAI from 'openai';
 
 const openai = new OpenAI({
   baseURL: 'https://your-worker.workers.dev/v1',
-  apiKey: 'dummy-key', // Not used but required by SDK
+  apiKey: 'sk-your-secret-api-key-here', // Use your OPENAI_API_KEY if authentication is enabled
 });
 
 const stream = await openai.chat.completions.create({
@@ -268,7 +278,7 @@ for await (const chunk of stream) {
 
 1. **Add as OpenAI-compatible endpoint**:
    - Base URL: `https://your-worker.workers.dev/v1`
-   - API Key: `dummy-key` (any value works)
+   - API Key: `sk-your-secret-api-key-here` (use your OPENAI_API_KEY if authentication is enabled)
 
 2. **Configure models**:
    Open WebUI will automatically discover available Gemini models through the `/v1/models` endpoint.
@@ -280,6 +290,7 @@ for await (const chunk of stream) {
 ```bash
 curl -X POST https://your-worker.workers.dev/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-secret-api-key-here" \
   -d '{
     "model": "gemini-2.5-flash",
     "messages": [
@@ -359,6 +370,13 @@ for line in response.iter_lines():
 |----------|----------|-------------|
 | `GCP_SERVICE_ACCOUNT` | ✅ | OAuth2 credentials JSON string |
 | `GEMINI_PROJECT_ID` | ❌ | Google Cloud Project ID (auto-discovered if not set) |
+| `OPENAI_API_KEY` | ❌ | API key for authentication (if not set, API is public) |
+
+**Authentication Security:**
+- When `OPENAI_API_KEY` is set, all `/v1/*` endpoints require authentication
+- Clients must include the header: `Authorization: Bearer <your-api-key>`
+- Without this environment variable, the API is publicly accessible
+- Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
 
 ### KV Namespaces
 
