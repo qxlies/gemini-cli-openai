@@ -4,6 +4,12 @@ Content-Type: application/json
 
 ###
 
+### Check KV cache status
+GET https://gemini-cli-worker.gewoonjaap.workers.dev/v1/debug/cache
+Content-Type: application/json
+
+###
+
 ### Test token authentication only
 POST https://gemini-cli-worker.gewoonjaap.workers.dev/v1/token-test
 Content-Type: application/json

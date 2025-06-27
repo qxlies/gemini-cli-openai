@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 export interface Env {
 	GCP_SERVICE_ACCOUNT: string; // Now contains OAuth2 credentials JSON
 	GEMINI_PROJECT_ID?: string;
+	GEMINI_CLI_KV: KVNamespace; // Cloudflare KV for token caching
 }
 
 // --- OAuth2 Credentials Interface ---
@@ -174,7 +175,7 @@ class GeminiCliHandler {
     }
 
     /**
-     * Initializes authentication using OAuth2 credentials.
+     * Initializes authentication using OAuth2 credentials with KV storage caching.
      */
     public async initializeAuth(): Promise<void> {
         if (!this.env.GCP_SERVICE_ACCOUNT) {
@@ -182,52 +183,121 @@ class GeminiCliHandler {
         }
 
         try {
+            // First, try to get a cached token from KV storage
+            const kvKey = 'oauth_token_cache';
+            let cachedTokenData = null;
+            
+            try {
+                const cachedToken = await this.env.GEMINI_CLI_KV.get(kvKey, 'json');
+                if (cachedToken) {
+                    cachedTokenData = cachedToken as { access_token: string; expiry_date: number };
+                    console.log('Found cached token in KV storage');
+                }
+            } catch (kvError) {
+                console.log('No cached token found in KV storage or KV error:', kvError);
+            }
+
+            // Check if cached token is still valid (with 5 minute buffer)
+            const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+            if (cachedTokenData) {
+                const timeUntilExpiry = cachedTokenData.expiry_date - Date.now();
+                if (timeUntilExpiry > bufferTime) {
+                    this.accessToken = cachedTokenData.access_token;
+                    console.log(`Using cached token, valid for ${Math.floor(timeUntilExpiry / 1000)} more seconds`);
+                    return;
+                }
+                console.log('Cached token expired or expiring soon');
+            }
+
+            // Parse original credentials from environment
             const oauth2Creds: OAuth2Credentials = JSON.parse(this.env.GCP_SERVICE_ACCOUNT);
             
-            // Check if access token is still valid (with 5 minute buffer)
+            // Check if the original token is still valid
             const timeUntilExpiry = oauth2Creds.expiry_date - Date.now();
-            const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
-            
             if (timeUntilExpiry > bufferTime) {
-                // Token is still valid
+                // Original token is still valid, cache it and use it
                 this.accessToken = oauth2Creds.access_token;
-                console.log(`Token is valid for ${Math.floor(timeUntilExpiry / 1000)} more seconds`);
+                console.log(`Original token is valid for ${Math.floor(timeUntilExpiry / 1000)} more seconds`);
+                
+                // Cache the token in KV storage
+                await this.cacheTokenInKV(oauth2Creds.access_token, oauth2Creds.expiry_date);
                 return;
             }
 
-            // Token is expired or will expire soon, refresh it
-            console.log('Access token expired or expiring soon, refreshing...');
-            
-            // Use the correct OAuth client credentials from the original implementation
-            const refreshResponse = await fetch('https://oauth2.googleapis.com/token', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({
-                    client_id: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
-                    client_secret: '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',
-                    refresh_token: oauth2Creds.refresh_token,
-                    grant_type: 'refresh_token',
-                }),
-            });
-
-            if (!refreshResponse.ok) {
-                const errorText = await refreshResponse.text();
-                console.error('Token refresh failed:', errorText);
-                throw new Error(`Token refresh failed: ${errorText}`);
-            }
-
-            const refreshData = await refreshResponse.json() as any;
-            this.accessToken = refreshData.access_token;
-            console.log('Token refreshed successfully');
-            
-            // Note: In a production environment, you'd want to save the updated credentials
-            // back to storage. For now, we'll just use the new token in memory.
+            // Both original and cached tokens are expired, refresh the token
+            console.log('All tokens expired, refreshing...');
+            await this.refreshAndCacheToken(oauth2Creds.refresh_token);
             
         } catch (e: any) {
-            console.error("Failed to parse OAuth2 credentials or refresh token:", e);
-            throw new Error("Invalid OAuth2 credentials or token refresh failed: " + e.message);
+            console.error("Failed to initialize authentication:", e);
+            throw new Error("Authentication failed: " + e.message);
+        }
+    }
+
+    /**
+     * Refresh the OAuth token and cache it in KV storage.
+     */
+    private async refreshAndCacheToken(refreshToken: string): Promise<void> {
+        console.log('Refreshing OAuth token...');
+        
+        const refreshResponse = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                client_id: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
+                client_secret: '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',
+                refresh_token: refreshToken,
+                grant_type: 'refresh_token',
+            }),
+        });
+
+        if (!refreshResponse.ok) {
+            const errorText = await refreshResponse.text();
+            console.error('Token refresh failed:', errorText);
+            throw new Error(`Token refresh failed: ${errorText}`);
+        }
+
+        const refreshData = await refreshResponse.json() as any;
+        this.accessToken = refreshData.access_token;
+        
+        // Calculate expiry time (typically 1 hour from now)
+        const expiryTime = Date.now() + (refreshData.expires_in * 1000);
+        
+        console.log('Token refreshed successfully');
+        console.log(`New token expires in ${refreshData.expires_in} seconds`);
+
+        // Cache the new token in KV storage
+        await this.cacheTokenInKV(refreshData.access_token, expiryTime);
+    }
+
+    /**
+     * Cache the access token in KV storage.
+     */
+    private async cacheTokenInKV(accessToken: string, expiryDate: number): Promise<void> {
+        try {
+            const kvKey = 'oauth_token_cache';
+            const tokenData = {
+                access_token: accessToken,
+                expiry_date: expiryDate,
+                cached_at: Date.now(),
+            };
+
+            // Cache for slightly less than the token expiry to be safe
+            const ttlSeconds = Math.floor((expiryDate - Date.now()) / 1000) - 300; // 5 minutes buffer
+            
+            if (ttlSeconds > 0) {
+                await this.env.GEMINI_CLI_KV.put(kvKey, JSON.stringify(tokenData), {
+                    expirationTtl: ttlSeconds,
+                });
+                console.log(`Token cached in KV storage with TTL of ${ttlSeconds} seconds`);
+            } else {
+                console.log('Token expires too soon, not caching in KV');
+            }
+        } catch (kvError) {
+            console.error('Failed to cache token in KV storage:', kvError);
+            // Don't throw an error here as the token is still valid, just not cached
         }
     }
 
@@ -277,8 +347,17 @@ class GeminiCliHandler {
 
         if (!response.ok) {
             if (response.status === 401 && !isRetry) {
-                console.log('Got 401 error, forcing token refresh and retrying...');
-                this.accessToken = null; // Clear token to force re-auth
+                console.log('Got 401 error, clearing token cache and retrying...');
+                this.accessToken = null; // Clear cached token
+                
+                // Clear the KV cache as well since the token might be invalid
+                try {
+                    await this.env.GEMINI_CLI_KV.delete('oauth_token_cache');
+                    console.log('Cleared cached token from KV storage');
+                } catch (kvError) {
+                    console.log('Error clearing KV cache:', kvError);
+                }
+                
                 await this.initializeAuth(); // This will refresh the token
                 return this.callEndpoint(method, body, true); // Retry once
             }
@@ -601,6 +680,40 @@ app.post('/v1/token-test', async (c) => {
             status: 'error', 
             message: e.message,
             stack: e.stack 
+        }, 500);
+    }
+});
+
+// KV cache debug endpoint
+app.get('/v1/debug/cache', async (c) => {
+    try {
+        const kvKey = 'oauth_token_cache';
+        const cachedToken = await c.env.GEMINI_CLI_KV.get(kvKey, 'json');
+        
+        if (cachedToken) {
+            const tokenData = cachedToken as { access_token: string; expiry_date: number; cached_at: number };
+            const timeUntilExpiry = tokenData.expiry_date - Date.now();
+            
+            return c.json({
+                status: 'ok',
+                cached: true,
+                cached_at: new Date(tokenData.cached_at).toISOString(),
+                expires_at: new Date(tokenData.expiry_date).toISOString(),
+                time_until_expiry_seconds: Math.floor(timeUntilExpiry / 1000),
+                is_expired: timeUntilExpiry < 0,
+                token_preview: tokenData.access_token.substring(0, 20) + '...'
+            });
+        } else {
+            return c.json({
+                status: 'ok',
+                cached: false,
+                message: 'No token found in cache'
+            });
+        }
+    } catch (e: any) {
+        return c.json({
+            status: 'error',
+            message: e.message
         }, 500);
     }
 });
