@@ -30,7 +30,21 @@ export interface ModelInfo {
 // --- Chat Completion Request Interface ---
 export interface ChatCompletionRequest {
     model: string;
-    messages: { role: string; content: string }[];
+    messages: ChatMessage[];
+}
+
+export interface ChatMessage {
+    role: string;
+    content: string | MessageContent[];
+}
+
+export interface MessageContent {
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: {
+        url: string;
+        detail?: 'low' | 'high' | 'auto';
+    };
 }
 
 // --- Stream Chunk Types ---

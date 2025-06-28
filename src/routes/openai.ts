@@ -47,11 +47,35 @@ OpenAIRoute.post('/chat/completions', async (c) => {
             }, 400);
         }
 
+        // Check if the request contains images and validate model support
+        const hasImages = messages.some((msg: any) => {
+            if (Array.isArray(msg.content)) {
+                return msg.content.some((content: any) => content.type === 'image_url');
+            }
+            return false;
+        });
+
+        if (hasImages && !geminiCliModels[model].supportsImages) {
+            return c.json({
+                error: `Model '${model}' does not support image inputs. Please use a vision-capable model like gemini-2.5-pro or gemini-2.5-flash.`
+            }, 400);
+        }
+
         // Extract system prompt and user/assistant messages
         let systemPrompt = '';
         const otherMessages = messages.filter((msg: any) => {
             if (msg.role === 'system') {
-                systemPrompt = msg.content;
+                // Handle system messages with both string and array content
+                if (typeof msg.content === 'string') {
+                    systemPrompt = msg.content;
+                } else if (Array.isArray(msg.content)) {
+                    // For system messages, only extract text content
+                    const textContent = msg.content
+                        .filter((part: any) => part.type === 'text')
+                        .map((part: any) => part.text)
+                        .join(' ');
+                    systemPrompt = textContent;
+                }
                 return false;
             }
             return true;

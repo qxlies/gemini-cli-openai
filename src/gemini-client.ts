@@ -1,6 +1,8 @@
 import { Env, StreamChunk } from './types';
 import { AuthManager } from './auth';
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from './config';
+import { geminiCliModels } from './models';
+import { validateImageUrl } from './utils/image-utils';
 
 /**
  * Handles communication with Google's Gemini API through the Code Assist endpoint.
@@ -88,16 +90,101 @@ export class GeminiApiClient {
     }
 
     /**
+     * Converts a message to Gemini format, handling both text and image content.
+     */
+    private messageToGeminiFormat(msg: any): any {
+        const role = msg.role === 'assistant' ? 'model' : 'user';
+        
+        if (typeof msg.content === 'string') {
+            // Simple text message
+            return {
+                role,
+                parts: [{ text: msg.content }]
+            };
+        }
+        
+        if (Array.isArray(msg.content)) {
+            // Multimodal message with text and/or images
+            const parts: any[] = [];
+            
+            for (const content of msg.content) {
+                if (content.type === 'text') {
+                    parts.push({ text: content.text });
+                } else if (content.type === 'image_url') {
+                    const imageUrl = content.image_url.url;
+                    
+                    // Validate image URL
+                    const validation = validateImageUrl(imageUrl);
+                    if (!validation.isValid) {
+                        throw new Error(`Invalid image: ${validation.error}`);
+                    }
+                    
+                    if (imageUrl.startsWith('data:')) {
+                        // Handle base64 encoded images
+                        const [mimeType, base64Data] = imageUrl.split(',');
+                        const mediaType = mimeType.split(':')[1].split(';')[0];
+                        
+                        parts.push({
+                            inlineData: {
+                                mimeType: mediaType,
+                                data: base64Data
+                            }
+                        });
+                    } else {
+                        // Handle URL images
+                        // Note: For better reliability, you might want to fetch the image
+                        // and convert it to base64, as Gemini API might have limitations with external URLs
+                        parts.push({
+                            fileData: {
+                                mimeType: validation.mimeType || 'image/jpeg',
+                                fileUri: imageUrl
+                            }
+                        });
+                    }
+                }
+            }
+            
+            return { role, parts };
+        }
+        
+        // Fallback for unexpected content format
+        return {
+            role,
+            parts: [{ text: String(msg.content) }]
+        };
+    }
+
+    /**
+     * Validates if the model supports images.
+     */
+    private validateImageSupport(modelId: string): boolean {
+        return geminiCliModels[modelId]?.supportsImages || false;
+    }
+
+    /**
+     * Validates image content and format.
+     */
+    private validateImageContent(imageUrl: string): boolean {
+        if (imageUrl.startsWith('data:image/')) {
+            // Validate base64 image format
+            const supportedFormats = ['jpeg', 'jpg', 'png', 'gif', 'webp'];
+            const mimeType = imageUrl.split(',')[0].split(':')[1].split(';')[0];
+            const format = mimeType.split('/')[1];
+            return supportedFormats.includes(format.toLowerCase());
+        }
+        
+        // For URL images, basic validation
+        return imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
+    }
+
+    /**
      * Stream content from Gemini API.
      */
     async *streamContent(modelId: string, systemPrompt: string, messages: any[]): AsyncGenerator<StreamChunk> {
         await this.authManager.initializeAuth();
         const projectId = await this.discoverProjectId();
 
-        const contents = messages.map((msg) => ({
-            role: msg.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: msg.content }],
-        }));
+        const contents = messages.map((msg) => this.messageToGeminiFormat(msg));
 
         if (systemPrompt) {
             contents.unshift({ role: 'user', parts: [{ text: systemPrompt }] });
