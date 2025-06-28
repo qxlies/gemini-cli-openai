@@ -7,6 +7,7 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 - 🔐 **OAuth2 Authentication** - No API keys required, uses your Google account
 - 🎯 **OpenAI-Compatible API** - Drop-in replacement for OpenAI endpoints
 - 📚 **OpenAI SDK Support** - Works with official OpenAI SDKs and libraries
+- 🖼️ **Vision Support** - Multi-modal conversations with images (base64 & URLs)
 - 🌐 **Third-party Integration** - Compatible with Open WebUI, ChatGPT clients, and more
 - ⚡ **Cloudflare Workers** - Global edge deployment with low latency
 - 🔄 **Smart Token Caching** - Intelligent token management with KV storage
@@ -360,6 +361,119 @@ for line in response.iter_lines():
                 print(content, end='')
         except json.JSONDecodeError:
             continue
+```
+
+### Image Support (Vision)
+
+The worker supports multimodal conversations with images for vision-capable models. Images can be provided as base64-encoded data URLs or as external URLs.
+
+#### Supported Image Formats
+- JPEG, PNG, GIF, WebP
+- Base64 encoded (recommended for reliability)
+- External URLs (may have limitations with some services)
+
+#### Vision-Capable Models
+- `gemini-2.5-pro`
+- `gemini-2.5-flash` 
+- `gemini-2.0-flash-001`
+- `gemini-2.0-flash-lite-preview-02-05`
+- `gemini-2.0-pro-exp-02-05`
+
+#### Example with Base64 Image
+```python
+from openai import OpenAI
+import base64
+
+# Encode your image
+with open("image.jpg", "rb") as image_file:
+    base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+client = OpenAI(
+    base_url="https://your-worker.workers.dev/v1",
+    api_key="sk-your-secret-api-key-here"
+)
+
+response = client.chat.completions.create(
+    model="gemini-2.5-flash",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "What do you see in this image?"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                }
+            ]
+        }
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+#### Example with Image URL
+```bash
+curl -X POST https://your-worker.workers.dev/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-secret-api-key-here" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Describe this image in detail."
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://example.com/image.jpg",
+              "detail": "high"
+            }
+          }
+        ]
+      }
+    ]
+  }'
+```
+
+#### Multiple Images
+You can include multiple images in a single message:
+```json
+{
+  "model": "gemini-2.5-pro",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Compare these two images."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,..."
+          }
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,..."
+          }
+        }
+      ]
+    }
+  ]
+}
 ```
 
 ## 🔧 Configuration
