@@ -81,8 +81,10 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 				};
 				controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
 			}
-			// Note: Usage chunks are not forwarded in this implementation
-			// They could be handled here if needed for token counting
+			// Note: Usage chunks are intentionally not forwarded in streaming responses
+			// as OpenAI's streaming format doesn't include usage data in individual chunks.
+			// Usage information is available in non-streaming responses via the usage field.
+			// Future enhancement: Could be added to the final chunk if needed for compatibility.
 		},
 		flush(controller) {
 			// Send the final chunk with the finish reason.

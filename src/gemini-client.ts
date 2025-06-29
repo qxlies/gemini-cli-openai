@@ -1,6 +1,7 @@
 import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY } from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
 
@@ -36,7 +37,7 @@ interface GeminiPart {
 }
 
 // Message content types - keeping only the local ones needed
-interface TextContentFilter {
+interface TextContent {
 	type: "text";
 	text: string;
 }
@@ -51,7 +52,7 @@ interface ProjectDiscoveryResponse {
 }
 
 // Type guard functions
-function isTextContent(content: MessageContent): content is TextContentFilter {
+function isTextContent(content: MessageContent): content is TextContent {
 	return content.type === "text" && typeof content.text === "string";
 }
 
@@ -279,14 +280,11 @@ export class GeminiApiClient {
 			}
 		}
 
-		// Generate reasoning text based on the user's question
-		const reasoningTexts = [
-			`🔍 **Analyzing the request: "${userContent.substring(0, 100)}${userContent.length > 100 ? "..." : ""}"**\n\n`,
-			"🤔 Let me think about this step by step... ",
-			"💭 I need to consider the context and provide a comprehensive response. ",
-			"🎯 Based on my understanding, I should address the key points while being accurate and helpful. ",
-			"✨ Let me formulate a clear and structured answer.\n\n"
-		];
+		// Generate reasoning text based on the user's question using constants
+		const requestPreview = userContent.substring(0, 100) + (userContent.length > 100 ? "..." : "");
+		const reasoningTexts = REASONING_MESSAGES.map(msg => 
+			msg.replace("{requestPreview}", requestPreview)
+		);
 
 		// Stream the reasoning text in chunks
 		for (const reasoningText of reasoningTexts) {
@@ -297,7 +295,7 @@ export class GeminiApiClient {
 			};
 
 			// Add a small delay to simulate thinking time
-			await new Promise((resolve) => setTimeout(resolve, 100));
+			await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY));
 		}
 	}
 
