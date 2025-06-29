@@ -9,16 +9,16 @@ export interface ImageValidationResult {
 	format?: string;
 }
 
-interface DataUrlComponents {
+export interface DataUrlComponents {
 	mimeType: string;
 	data: string;
 }
 
-interface ModelInfo {
+export interface ModelInfo {
 	supportsImages?: boolean;
 }
 
-type ModelRegistry = Record<string, ModelInfo>;
+export type ModelRegistry = Record<string, ModelInfo>;
 
 /**
  * Validates an image URL or base64 data URL

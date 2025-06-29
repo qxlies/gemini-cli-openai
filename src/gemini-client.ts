@@ -233,19 +233,11 @@ export class GeminiApiClient {
 	}
 
 	/**
-	 * Validates image content and format.
+	 * Validates image content and format using the shared validation utility.
 	 */
 	private validateImageContent(imageUrl: string): boolean {
-		if (imageUrl.startsWith("data:image/")) {
-			// Validate base64 image format
-			const supportedFormats = ["jpeg", "jpg", "png", "gif", "webp"];
-			const mimeType = imageUrl.split(",")[0].split(":")[1].split(";")[0];
-			const format = mimeType.split("/")[1];
-			return supportedFormats.includes(format.toLowerCase());
-		}
-
-		// For URL images, basic validation
-		return imageUrl.startsWith("http://") || imageUrl.startsWith("https://");
+		const validation = validateImageUrl(imageUrl);
+		return validation.isValid;
 	}
 
 	/**
@@ -273,6 +265,13 @@ export class GeminiApiClient {
 			}
 		};
 
+		yield* this.performStreamRequest(streamRequest);
+	}
+
+	/**
+	 * Performs the actual stream request with retry logic for 401 errors.
+	 */
+	private async *performStreamRequest(streamRequest: unknown, isRetry: boolean = false): AsyncGenerator<StreamChunk> {
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
 			method: "POST",
 			headers: {
@@ -283,6 +282,13 @@ export class GeminiApiClient {
 		});
 
 		if (!response.ok) {
+			if (response.status === 401 && !isRetry) {
+				console.log("Got 401 error in stream request, clearing token cache and retrying...");
+				await this.authManager.clearTokenCache();
+				await this.authManager.initializeAuth();
+				yield* this.performStreamRequest(streamRequest, true); // Retry once
+				return;
+			}
 			const errorText = await response.text();
 			console.error(`[GeminiAPI] Stream request failed: ${response.status}`, errorText);
 			throw new Error(`Stream request failed: ${response.status}`);

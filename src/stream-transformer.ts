@@ -47,22 +47,24 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 
 	return new TransformStream({
 		transform(chunk, controller) {
-			if (chunk.type !== "text" || !chunk.data || typeof chunk.data !== "string") return;
+			if (chunk.type === "text" && chunk.data && typeof chunk.data === "string") {
+				const delta: OpenAIDelta = { content: chunk.data };
+				if (firstChunk) {
+					delta.role = "assistant";
+					firstChunk = false;
+				}
 
-			const delta: OpenAIDelta = { content: chunk.data };
-			if (firstChunk) {
-				delta.role = "assistant";
-				firstChunk = false;
+				const openAIChunk: OpenAIChunk = {
+					id: chatID,
+					object: OPENAI_CHAT_COMPLETION_OBJECT,
+					created: creationTime,
+					model: model,
+					choices: [{ index: 0, delta: delta, finish_reason: null }]
+				};
+				controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
 			}
-
-			const openAIChunk: OpenAIChunk = {
-				id: chatID,
-				object: OPENAI_CHAT_COMPLETION_OBJECT,
-				created: creationTime,
-				model: model,
-				choices: [{ index: 0, delta: delta, finish_reason: null }]
-			};
-			controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+			// Note: Usage chunks are not forwarded in this implementation
+			// They could be handled here if needed for token counting
 		},
 		flush(controller) {
 			// Send the final chunk with the finish reason.
