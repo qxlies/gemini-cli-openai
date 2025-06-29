@@ -21,6 +21,17 @@ import { openAIApiKeyAuth } from "./middlewares/auth";
 // Create the main Hono app
 const app = new Hono<{ Bindings: Env }>();
 
+// Add simple logging middleware
+app.use("*", async (c, next) => {
+	const method = c.req.method;
+	const path = c.req.path;
+	const timestamp = new Date().toISOString();
+
+	console.log(`[${timestamp}] ${method} ${path}`);
+
+	await next();
+});
+
 // Add CORS headers for all requests
 app.use("*", async (c, next) => {
 	// Set CORS headers
