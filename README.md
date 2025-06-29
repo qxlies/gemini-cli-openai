@@ -552,4 +552,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **⚠️ Important**: This project uses Google's Code Assist API which may have usage limits and terms of service. Please ensure compliance with Google's policies when using this worker.
 
+
 [![Star History Chart](https://api.star-history.com/svg?repos=GewoonJaap/gemini-cli-openai&type=Date)](https://www.star-history.com/#GewoonJaap/gemini-cli-openai&Date)
