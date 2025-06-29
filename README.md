@@ -17,10 +17,12 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 
 ## 🤖 Supported Models
 
-| Model ID | Context Window | Max Tokens | Description |
-|----------|----------------|------------|-------------|
-| `gemini-2.5-pro` | 1M | 65K | Latest Gemini 2.5 Pro model |
-| `gemini-2.5-flash` | 1M | 65K | Fast Gemini 2.5 Flash model |
+| Model ID | Context Window | Max Tokens | Thinking Support | Description |
+|----------|----------------|------------|------------------|-------------|
+| `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
+| `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
+
+> **Note:** Thinking support requires `ENABLE_FAKE_THINKING=true` environment variable. When enabled, these models will show their reasoning process before providing the final answer.
 
 ## 🏗️ How It Works
 
@@ -477,12 +479,19 @@ You can include multiple images in a single message:
 | `GCP_SERVICE_ACCOUNT` | ✅ | OAuth2 credentials JSON string |
 | `GEMINI_PROJECT_ID` | ❌ | Google Cloud Project ID (auto-discovered if not set) |
 | `OPENAI_API_KEY` | ❌ | API key for authentication (if not set, API is public) |
+| `ENABLE_FAKE_THINKING` | ❌ | Enable synthetic thinking output for thinking models (set to "true" to enable) |
 
 **Authentication Security:**
 - When `OPENAI_API_KEY` is set, all `/v1/*` endpoints require authentication
 - Clients must include the header: `Authorization: Bearer <your-api-key>`
 - Without this environment variable, the API is publicly accessible
 - Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
+
+**Thinking Models:**
+- When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
+- This simulates the thinking process similar to OpenAI's o3 model behavior, showing the model's reasoning steps
+- The reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
+- If not set or set to any value other than "true", thinking models will behave like regular models
 
 ### KV Namespaces
 
