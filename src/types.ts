@@ -8,47 +8,47 @@ export interface Env {
 
 // --- OAuth2 Credentials Interface ---
 export interface OAuth2Credentials {
-    access_token: string;
-    refresh_token: string;
-    scope: string;
-    token_type: string;
-    id_token: string;
-    expiry_date: number;
+	access_token: string;
+	refresh_token: string;
+	scope: string;
+	token_type: string;
+	id_token: string;
+	expiry_date: number;
 }
 
 // --- Model Information Interface ---
 export interface ModelInfo {
-    maxTokens: number;
-    contextWindow: number;
-    supportsImages: boolean;
-    supportsPromptCache: boolean;
-    inputPrice: number;
-    outputPrice: number;
-    description: string;
+	maxTokens: number;
+	contextWindow: number;
+	supportsImages: boolean;
+	supportsPromptCache: boolean;
+	inputPrice: number;
+	outputPrice: number;
+	description: string;
 }
 
 // --- Chat Completion Request Interface ---
 export interface ChatCompletionRequest {
-    model: string;
-    messages: ChatMessage[];
+	model: string;
+	messages: ChatMessage[];
 }
 
 export interface ChatMessage {
-    role: string;
-    content: string | MessageContent[];
+	role: string;
+	content: string | MessageContent[];
 }
 
 export interface MessageContent {
-    type: 'text' | 'image_url';
-    text?: string;
-    image_url?: {
-        url: string;
-        detail?: 'low' | 'high' | 'auto';
-    };
+	type: "text" | "image_url";
+	text?: string;
+	image_url?: {
+		url: string;
+		detail?: "low" | "high" | "auto";
+	};
 }
 
 // --- Stream Chunk Types ---
 export interface StreamChunk {
-    type: 'text' | 'usage';
-    data: any;
+	type: "text" | "usage";
+	data: string | { inputTokens: number; outputTokens: number };
 }
