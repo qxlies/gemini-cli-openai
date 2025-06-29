@@ -3,6 +3,7 @@ import { Env } from "./types";
 import { OpenAIRoute } from "./routes/openai";
 import { DebugRoute } from "./routes/debug";
 import { openAIApiKeyAuth } from "./middlewares/auth";
+import { loggingMiddleware } from "./middlewares/logging";
 
 /**
  * Gemini CLI OpenAI Worker
@@ -20,6 +21,9 @@ import { openAIApiKeyAuth } from "./middlewares/auth";
 
 // Create the main Hono app
 const app = new Hono<{ Bindings: Env }>();
+
+// Add logging middleware
+app.use("*", loggingMiddleware);
 
 // Add CORS headers for all requests
 app.use("*", async (c, next) => {

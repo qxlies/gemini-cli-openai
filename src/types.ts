@@ -4,6 +4,7 @@ export interface Env {
 	GEMINI_PROJECT_ID?: string;
 	GEMINI_CLI_KV: KVNamespace; // Cloudflare KV for token caching
 	OPENAI_API_KEY?: string; // Optional API key for authentication
+	ENABLE_FAKE_THINKING?: string; // Optional flag to enable fake thinking output (set to "true" to enable)
 }
 
 // --- OAuth2 Credentials Interface ---
@@ -25,12 +26,14 @@ export interface ModelInfo {
 	inputPrice: number;
 	outputPrice: number;
 	description: string;
+	thinking: boolean; // Indicates if the model supports thinking
 }
 
 // --- Chat Completion Request Interface ---
 export interface ChatCompletionRequest {
 	model: string;
 	messages: ChatMessage[];
+	stream?: boolean;
 }
 
 export interface ChatMessage {
@@ -47,8 +50,45 @@ export interface MessageContent {
 	};
 }
 
+// --- Chat Completion Response Interfaces ---
+export interface ChatCompletionResponse {
+	id: string;
+	object: "chat.completion";
+	created: number;
+	model: string;
+	choices: ChatCompletionChoice[];
+	usage?: ChatCompletionUsage;
+}
+
+export interface ChatCompletionChoice {
+	index: number;
+	message: ChatCompletionMessage;
+	finish_reason: "stop" | "length" | "function_call" | "content_filter" | null;
+}
+
+export interface ChatCompletionMessage {
+	role: "assistant";
+	content: string;
+}
+
+export interface ChatCompletionUsage {
+	prompt_tokens: number;
+	completion_tokens: number;
+	total_tokens: number;
+}
+
+// --- Usage and Reasoning Data Types ---
+export interface UsageData {
+	inputTokens: number;
+	outputTokens: number;
+}
+
+export interface ReasoningData {
+	reasoning: string;
+}
+
 // --- Stream Chunk Types ---
 export interface StreamChunk {
-	type: "text" | "usage";
-	data: string | { inputTokens: number; outputTokens: number };
+	type: "text" | "usage" | "reasoning";
+	data: string | UsageData | ReasoningData;
 }

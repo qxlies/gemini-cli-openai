@@ -1,6 +1,7 @@
-import { Env, StreamChunk } from "./types";
+import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY } from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
 
@@ -35,32 +36,10 @@ interface GeminiPart {
 	};
 }
 
-// Message content types
-interface MessageContentText {
+// Message content types - keeping only the local ones needed
+interface TextContent {
 	type: "text";
-	text?: string;
-}
-
-interface MessageContentImage {
-	type: "image_url";
-	image_url?: {
-		url: string;
-	};
-}
-
-interface MessageContentGeneric {
-	type: string;
-	text?: string;
-	image_url?: {
-		url: string;
-	};
-}
-
-type MessageContent = MessageContentText | MessageContentImage | MessageContentGeneric;
-
-interface ChatMessage {
-	role: string;
-	content: string | MessageContent[];
+	text: string;
 }
 
 interface GeminiFormattedMessage {
@@ -70,6 +49,11 @@ interface GeminiFormattedMessage {
 
 interface ProjectDiscoveryResponse {
 	cloudaicompanionProject?: string;
+}
+
+// Type guard functions
+function isTextContent(content: MessageContent): content is TextContent {
+	return content.type === "text" && typeof content.text === "string";
 }
 
 /**
@@ -253,6 +237,15 @@ export class GeminiApiClient {
 			contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
 		}
 
+		// Check if this is a thinking model and if fake thinking is enabled
+		const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
+		const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
+
+		// For thinking models, emit reasoning before the actual response (only if fake thinking is enabled)
+		if (isThinkingModel && isFakeThinkingEnabled) {
+			yield* this.generateReasoningOutput(modelId, messages);
+		}
+
 		const streamRequest = {
 			model: modelId,
 			project: projectId,
@@ -266,6 +259,42 @@ export class GeminiApiClient {
 		};
 
 		yield* this.performStreamRequest(streamRequest);
+	}
+
+	/**
+	 * Generates reasoning output for thinking models.
+	 */
+	private async *generateReasoningOutput(modelId: string, messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+		// Get the last user message to understand what the model should think about
+		const lastUserMessage = messages.filter((msg) => msg.role === "user").pop();
+		let userContent = "";
+
+		if (lastUserMessage) {
+			if (typeof lastUserMessage.content === "string") {
+				userContent = lastUserMessage.content;
+			} else if (Array.isArray(lastUserMessage.content)) {
+				userContent = lastUserMessage.content
+					.filter(isTextContent)
+					.map((c) => c.text)
+					.join(" ");
+			}
+		}
+
+		// Generate reasoning text based on the user's question using constants
+		const requestPreview = userContent.substring(0, 100) + (userContent.length > 100 ? "..." : "");
+		const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
+
+		// Stream the reasoning text in chunks
+		for (const reasoningText of reasoningTexts) {
+			const reasoningData: ReasoningData = { reasoning: reasoningText };
+			yield {
+				type: "reasoning",
+				data: reasoningData
+			};
+
+			// Add a small delay to simulate thinking time
+			await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY));
+		}
 	}
 
 	/**
@@ -307,14 +336,39 @@ export class GeminiApiClient {
 
 			if (jsonData.response?.usageMetadata) {
 				const usage = jsonData.response.usageMetadata;
+				const usageData: UsageData = {
+					inputTokens: usage.promptTokenCount || 0,
+					outputTokens: usage.candidatesTokenCount || 0
+				};
 				yield {
 					type: "usage",
-					data: {
-						inputTokens: usage.promptTokenCount || 0,
-						outputTokens: usage.candidatesTokenCount || 0
-					}
+					data: usageData
 				};
 			}
 		}
+	}
+
+	/**
+	 * Get a complete response from Gemini API (non-streaming).
+	 */
+	async getCompletion(
+		modelId: string,
+		systemPrompt: string,
+		messages: ChatMessage[]
+	): Promise<{ content: string; usage?: UsageData }> {
+		let content = "";
+		let usage: UsageData | undefined;
+
+		// Collect all chunks from the stream
+		for await (const chunk of this.streamContent(modelId, systemPrompt, messages)) {
+			if (chunk.type === "text" && typeof chunk.data === "string") {
+				content += chunk.data;
+			} else if (chunk.type === "usage" && typeof chunk.data === "object") {
+				usage = chunk.data as UsageData;
+			}
+			// Skip reasoning chunks for non-streaming responses
+		}
+
+		return { content, usage };
 	}
 }

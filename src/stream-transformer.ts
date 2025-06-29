@@ -1,4 +1,4 @@
-import { StreamChunk } from "./types";
+import { StreamChunk, ReasoningData } from "./types";
 import { OPENAI_CHAT_COMPLETION_OBJECT } from "./config";
 
 // OpenAI API interfaces
@@ -10,7 +10,8 @@ interface OpenAIChoice {
 
 interface OpenAIDelta {
 	role?: string;
-	content: string;
+	content?: string;
+	reasoning?: string;
 }
 
 interface OpenAIChunk {
@@ -33,6 +34,11 @@ interface OpenAIFinalChunk {
 	created: number;
 	model: string;
 	choices: OpenAIFinalChoice[];
+}
+
+// Type guard functions
+function isReasoningData(data: unknown): data is ReasoningData {
+	return typeof data === "object" && data !== null && "reasoning" in data;
 }
 
 /**
@@ -62,9 +68,23 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 					choices: [{ index: 0, delta: delta, finish_reason: null }]
 				};
 				controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+			} else if (chunk.type === "reasoning" && isReasoningData(chunk.data)) {
+				// Handle thinking/reasoning chunks
+				const delta: OpenAIDelta = { reasoning: chunk.data.reasoning };
+
+				const openAIChunk: OpenAIChunk = {
+					id: chatID,
+					object: OPENAI_CHAT_COMPLETION_OBJECT,
+					created: creationTime,
+					model: model,
+					choices: [{ index: 0, delta: delta, finish_reason: null }]
+				};
+				controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
 			}
-			// Note: Usage chunks are not forwarded in this implementation
-			// They could be handled here if needed for token counting
+			// Note: Usage chunks are intentionally not forwarded in streaming responses
+			// as OpenAI's streaming format doesn't include usage data in individual chunks.
+			// Usage information is available in non-streaming responses via the usage field.
+			// Future enhancement: Could be added to the final chunk if needed for compatibility.
 		},
 		flush(controller) {
 			// Send the final chunk with the finish reason.
