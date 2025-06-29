@@ -308,11 +308,11 @@ export class GeminiApiClient {
 
 		// Generate reasoning text based on the user's question
 		const reasoningTexts = [
-			`**Analyzing the request: "${userContent.substring(0, 100)}${userContent.length > 100 ? "..." : ""}"**\n\n`,
-			"Let me think about this step by step. ",
-			"I need to consider the context and provide a comprehensive response. ",
-			"Based on my understanding, I should address the key points while being accurate and helpful. ",
-			"Let me formulate a clear and structured answer.\n\n"
+			`🔍 **Analyzing the request: "${userContent.substring(0, 100)}${userContent.length > 100 ? "..." : ""}"**\n\n`,
+			"🤔 Let me think about this step by step... ",
+			"💭 I need to consider the context and provide a comprehensive response. ",
+			"🎯 Based on my understanding, I should address the key points while being accurate and helpful. ",
+			"✨ Let me formulate a clear and structured answer.\n\n"
 		];
 
 		// Stream the reasoning text in chunks
