@@ -21,11 +21,6 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 |----------|----------------|------------|-------------|
 | `gemini-2.5-pro` | 1M | 65K | Latest Gemini 2.5 Pro model |
 | `gemini-2.5-flash` | 1M | 65K | Fast Gemini 2.5 Flash model |
-| `gemini-2.0-flash-001` | 1M | 8K | Gemini 2.0 Flash |
-| `gemini-2.0-flash-thinking-exp-01-21` | 1M | 65K | Experimental thinking model |
-| `gemini-exp-1206` | 2M | 8K | Latest experimental model |
-| `gemini-1.5-pro-002` | 2M | 8K | Gemini 1.5 Pro |
-| `gemini-1.5-flash-002` | 1M | 8K | Gemini 1.5 Flash |
 
 ## 🏗️ How It Works
 
@@ -61,20 +56,24 @@ The worker acts as a translation layer, converting OpenAI API calls to Google's 
 
 You need OAuth2 credentials from a Google account that has accessed Gemini. The easiest way to get these is through the official Gemini CLI.
 
-#### Option 1: Using Gemini CLI (Recommended)
+#### Using Gemini CLI
 
 1. **Install Gemini CLI**:
    ```bash
    npm install -g @google/gemini-cli
    ```
 
-2. **Authenticate with Google**:
+2. **Start the Gemini CLI**:
    ```bash
-   gemini auth
+   gemini
    ```
-   This will open a browser window for Google OAuth2 authentication.
-
-3. **Locate the credentials file**:
+3. **Authenticate with Google**:
+   
+   Select `● Login with Google`.
+   
+   A browser window will now open prompting you to login with your Google account.
+   
+4. **Locate the credentials file**:
    
    **Windows:**
    ```
@@ -86,7 +85,7 @@ You need OAuth2 credentials from a Google account that has accessed Gemini. The 
    ~/.gemini/oauth_creds.json
    ```
 
-4. **Copy the credentials**:
+5. **Copy the credentials**:
    The file contains JSON in this format:
    ```json
    {
@@ -99,10 +98,6 @@ You need OAuth2 credentials from a Google account that has accessed Gemini. The 
    }
    ```
 
-#### Option 2: Manual OAuth2 Flow
-
-If you can't use the Gemini CLI, you'll need to create OAuth2 credentials manually through Google's OAuth2 flow with the same client ID and scopes that the Gemini CLI uses.
-
 ### Step 2: Create KV Namespace
 
 ```bash
@@ -110,7 +105,13 @@ If you can't use the Gemini CLI, you'll need to create OAuth2 credentials manual
 wrangler kv:namespace create "GEMINI_CLI_KV"
 ```
 
-Note the namespace ID returned and update `wrangler.toml`.
+Note the namespace ID returned.
+Update `wrangler.toml` with your KV namespace ID:
+```toml
+kv_namespaces = [
+  { binding = "GEMINI_CLI_KV", id = "your-kv-namespace-id" }
+]
+```
 
 ### Step 3: Environment Setup
 
@@ -145,15 +146,6 @@ npm run deploy
 
 # Or run locally for development
 npm run dev
-```
-
-### Step 5: Update Wrangler Configuration
-
-Update `wrangler.toml` with your KV namespace ID:
-```toml
-kv_namespaces = [
-  { binding = "GEMINI_CLI_KV", id = "your-kv-namespace-id" }
-]
 ```
 
 ## 📡 API Endpoints
