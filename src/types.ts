@@ -33,6 +33,7 @@ export interface ModelInfo {
 export interface ChatCompletionRequest {
 	model: string;
 	messages: ChatMessage[];
+	stream?: boolean;
 }
 
 export interface ChatMessage {
@@ -47,6 +48,33 @@ export interface MessageContent {
 		url: string;
 		detail?: "low" | "high" | "auto";
 	};
+}
+
+// --- Chat Completion Response Interfaces ---
+export interface ChatCompletionResponse {
+	id: string;
+	object: "chat.completion";
+	created: number;
+	model: string;
+	choices: ChatCompletionChoice[];
+	usage?: ChatCompletionUsage;
+}
+
+export interface ChatCompletionChoice {
+	index: number;
+	message: ChatCompletionMessage;
+	finish_reason: "stop" | "length" | "function_call" | "content_filter" | null;
+}
+
+export interface ChatCompletionMessage {
+	role: "assistant";
+	content: string;
+}
+
+export interface ChatCompletionUsage {
+	prompt_tokens: number;
+	completion_tokens: number;
+	total_tokens: number;
 }
 
 // --- Usage and Reasoning Data Types ---

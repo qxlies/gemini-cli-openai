@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { Env, ChatCompletionRequest } from "../types";
+import { Env, ChatCompletionRequest, ChatCompletionResponse } from "../types";
 import { geminiCliModels, DEFAULT_MODEL, getAllModelIds } from "../models";
 import { OPENAI_MODEL_OWNER } from "../config";
 import { AuthManager } from "../auth";
@@ -33,8 +33,9 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const body = await c.req.json<ChatCompletionRequest>();
 		const model = body.model || DEFAULT_MODEL;
 		const messages = body.messages || [];
+		const stream = body.stream !== false; // Default to streaming (true) unless explicitly set to false
 
-		console.log("Request body parsed:", { model, messageCount: messages.length });
+		console.log("Request body parsed:", { model, messageCount: messages.length, stream });
 
 		if (!messages.length) {
 			return c.json({ error: "messages is a required field" }, 400);
@@ -101,48 +102,89 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			return c.json({ error: "Authentication failed: " + errorMessage }, 401);
 		}
 
-		// Create streaming response
-		const { readable, writable } = new TransformStream();
-		const writer = writable.getWriter();
-		const openAITransformer = createOpenAIStreamTransformer(model);
-		const openAIStream = readable.pipeThrough(openAITransformer);
+		if (stream) {
+			// Streaming response
+			const { readable, writable } = new TransformStream();
+			const writer = writable.getWriter();
+			const openAITransformer = createOpenAIStreamTransformer(model);
+			const openAIStream = readable.pipeThrough(openAITransformer);
 
-		// Asynchronously pipe data from Gemini to transformer
-		(async () => {
-			try {
-				console.log("Starting stream generation");
-				const geminiStream = geminiClient.streamContent(model, systemPrompt, otherMessages);
+			// Asynchronously pipe data from Gemini to transformer
+			(async () => {
+				try {
+					console.log("Starting stream generation");
+					const geminiStream = geminiClient.streamContent(model, systemPrompt, otherMessages);
 
-				for await (const chunk of geminiStream) {
-					console.log("Received chunk:", chunk.type);
-					await writer.write(chunk);
+					for await (const chunk of geminiStream) {
+						console.log("Received chunk:", chunk.type);
+						await writer.write(chunk);
+					}
+					console.log("Stream completed successfully");
+					await writer.close();
+				} catch (streamError: unknown) {
+					const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
+					console.error("Stream error:", errorMessage);
+					// Try to write an error chunk before closing
+					await writer.write({
+						type: "text",
+						data: `Error: ${errorMessage}`
+					});
+					await writer.close();
 				}
-				console.log("Stream completed successfully");
-				await writer.close();
-			} catch (streamError: unknown) {
-				const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
-				console.error("Stream error:", errorMessage);
-				// Try to write an error chunk before closing
-				await writer.write({
-					type: "text",
-					data: `Error: ${errorMessage}`
-				});
-				await writer.close();
-			}
-		})();
+			})();
 
-		// Return streaming response
-		console.log("Returning streaming response");
-		return new Response(openAIStream, {
-			headers: {
-				"Content-Type": "text/event-stream",
-				"Cache-Control": "no-cache",
-				Connection: "keep-alive",
-				"Access-Control-Allow-Origin": "*",
-				"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-				"Access-Control-Allow-Headers": "Content-Type, Authorization"
+			// Return streaming response
+			console.log("Returning streaming response");
+			return new Response(openAIStream, {
+				headers: {
+					"Content-Type": "text/event-stream",
+					"Cache-Control": "no-cache",
+					Connection: "keep-alive",
+					"Access-Control-Allow-Origin": "*",
+					"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization"
+				}
+			});
+		} else {
+			// Non-streaming response
+			try {
+				console.log("Starting non-streaming completion");
+				const completion = await geminiClient.getCompletion(model, systemPrompt, otherMessages);
+
+				const response: ChatCompletionResponse = {
+					id: `chatcmpl-${crypto.randomUUID()}`,
+					object: "chat.completion",
+					created: Math.floor(Date.now() / 1000),
+					model: model,
+					choices: [
+						{
+							index: 0,
+							message: {
+								role: "assistant",
+								content: completion.content
+							},
+							finish_reason: "stop"
+						}
+					]
+				};
+
+				// Add usage information if available
+				if (completion.usage) {
+					response.usage = {
+						prompt_tokens: completion.usage.inputTokens,
+						completion_tokens: completion.usage.outputTokens,
+						total_tokens: completion.usage.inputTokens + completion.usage.outputTokens
+					};
+				}
+
+				console.log("Non-streaming completion successful");
+				return c.json(response);
+			} catch (completionError: unknown) {
+				const errorMessage = completionError instanceof Error ? completionError.message : String(completionError);
+				console.error("Completion error:", errorMessage);
+				return c.json({ error: errorMessage }, 500);
 			}
-		});
+		}
 	} catch (e: unknown) {
 		const errorMessage = e instanceof Error ? e.message : String(e);
 		console.error("Top-level error:", e);

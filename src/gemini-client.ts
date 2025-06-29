@@ -1,4 +1,4 @@
-import { Env, StreamChunk, ReasoningData, UsageData } from "./types";
+import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
 import { geminiCliModels } from "./models";
@@ -35,37 +35,10 @@ interface GeminiPart {
 	};
 }
 
-// Message content types
-interface MessageContentText {
-	type: "text";
-	text?: string;
-}
-
-interface MessageContentImage {
-	type: "image_url";
-	image_url?: {
-		url: string;
-	};
-}
-
-interface MessageContentGeneric {
-	type: string;
-	text?: string;
-	image_url?: {
-		url: string;
-	};
-}
-
+// Message content types - keeping only the local ones needed
 interface TextContentFilter {
 	type: "text";
 	text: string;
-}
-
-type MessageContent = MessageContentText | MessageContentImage | MessageContentGeneric;
-
-interface ChatMessage {
-	role: string;
-	content: string | MessageContent[];
 }
 
 interface GeminiFormattedMessage {
@@ -377,5 +350,29 @@ export class GeminiApiClient {
 				};
 			}
 		}
+	}
+
+	/**
+	 * Get a complete response from Gemini API (non-streaming).
+	 */
+	async getCompletion(
+		modelId: string,
+		systemPrompt: string,
+		messages: ChatMessage[]
+	): Promise<{ content: string; usage?: UsageData }> {
+		let content = "";
+		let usage: UsageData | undefined;
+
+		// Collect all chunks from the stream
+		for await (const chunk of this.streamContent(modelId, systemPrompt, messages)) {
+			if (chunk.type === "text" && typeof chunk.data === "string") {
+				content += chunk.data;
+			} else if (chunk.type === "usage" && typeof chunk.data === "object") {
+				usage = chunk.data as UsageData;
+			}
+			// Skip reasoning chunks for non-streaming responses
+		}
+
+		return { content, usage };
 	}
 }
