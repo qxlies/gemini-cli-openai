@@ -25,11 +25,18 @@ const app = new Hono<{ Bindings: Env }>();
 app.use("*", async (c, next) => {
 	const method = c.req.method;
 	const path = c.req.path;
+	const startTime = Date.now();
 	const timestamp = new Date().toISOString();
 
-	console.log(`[${timestamp}] ${method} ${path}`);
+	console.log(`[${timestamp}] ${method} ${path} - Request started`);
 
 	await next();
+
+	const duration = Date.now() - startTime;
+	const status = c.res.status;
+	const endTimestamp = new Date().toISOString();
+
+	console.log(`[${endTimestamp}] ${method} ${path} - Completed with status ${status} (${duration}ms)`);
 });
 
 // Add CORS headers for all requests
