@@ -1,4 +1,4 @@
-import { StreamChunk } from "./types";
+import { StreamChunk, ReasoningData } from "./types";
 import { OPENAI_CHAT_COMPLETION_OBJECT } from "./config";
 
 // OpenAI API interfaces
@@ -10,7 +10,8 @@ interface OpenAIChoice {
 
 interface OpenAIDelta {
 	role?: string;
-	content: string;
+	content?: string;
+	reasoning?: string;
 }
 
 interface OpenAIChunk {
@@ -35,6 +36,11 @@ interface OpenAIFinalChunk {
 	choices: OpenAIFinalChoice[];
 }
 
+// Type guard functions
+function isReasoningData(data: unknown): data is ReasoningData {
+	return typeof data === "object" && data !== null && "reasoning" in data;
+}
+
 /**
  * Creates a TransformStream to convert Gemini's output chunks
  * into OpenAI-compatible server-sent events.
@@ -53,6 +59,18 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 					delta.role = "assistant";
 					firstChunk = false;
 				}
+
+				const openAIChunk: OpenAIChunk = {
+					id: chatID,
+					object: OPENAI_CHAT_COMPLETION_OBJECT,
+					created: creationTime,
+					model: model,
+					choices: [{ index: 0, delta: delta, finish_reason: null }]
+				};
+				controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIChunk)}\n\n`));
+			} else if (chunk.type === "reasoning" && isReasoningData(chunk.data)) {
+				// Handle thinking/reasoning chunks
+				const delta: OpenAIDelta = { reasoning: chunk.data.reasoning };
 
 				const openAIChunk: OpenAIChunk = {
 					id: chatID,

@@ -4,6 +4,7 @@ export interface Env {
 	GEMINI_PROJECT_ID?: string;
 	GEMINI_CLI_KV: KVNamespace; // Cloudflare KV for token caching
 	OPENAI_API_KEY?: string; // Optional API key for authentication
+	ENABLE_FAKE_THINKING?: string; // Optional flag to enable fake thinking output (set to "true" to enable)
 }
 
 // --- OAuth2 Credentials Interface ---
@@ -25,6 +26,7 @@ export interface ModelInfo {
 	inputPrice: number;
 	outputPrice: number;
 	description: string;
+	thinking: boolean; // Indicates if the model supports thinking
 }
 
 // --- Chat Completion Request Interface ---
@@ -47,8 +49,18 @@ export interface MessageContent {
 	};
 }
 
+// --- Usage and Reasoning Data Types ---
+export interface UsageData {
+	inputTokens: number;
+	outputTokens: number;
+}
+
+export interface ReasoningData {
+	reasoning: string;
+}
+
 // --- Stream Chunk Types ---
 export interface StreamChunk {
-	type: "text" | "usage";
-	data: string | { inputTokens: number; outputTokens: number };
+	type: "text" | "usage" | "reasoning";
+	data: string | UsageData | ReasoningData;
 }

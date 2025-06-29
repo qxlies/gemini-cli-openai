@@ -1,4 +1,4 @@
-import { Env, StreamChunk } from "./types";
+import { Env, StreamChunk, ReasoningData, UsageData } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
 import { geminiCliModels } from "./models";
@@ -56,6 +56,11 @@ interface MessageContentGeneric {
 	};
 }
 
+interface TextContentFilter {
+	type: "text";
+	text: string;
+}
+
 type MessageContent = MessageContentText | MessageContentImage | MessageContentGeneric;
 
 interface ChatMessage {
@@ -70,6 +75,11 @@ interface GeminiFormattedMessage {
 
 interface ProjectDiscoveryResponse {
 	cloudaicompanionProject?: string;
+}
+
+// Type guard functions
+function isTextContent(content: MessageContent): content is TextContentFilter {
+	return content.type === "text" && typeof content.text === "string";
 }
 
 /**
@@ -253,6 +263,15 @@ export class GeminiApiClient {
 			contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
 		}
 
+		// Check if this is a thinking model and if fake thinking is enabled
+		const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
+		const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
+
+		// For thinking models, emit reasoning before the actual response (only if fake thinking is enabled)
+		if (isThinkingModel && isFakeThinkingEnabled) {
+			yield* this.generateReasoningOutput(modelId, messages);
+		}
+
 		const streamRequest = {
 			model: modelId,
 			project: projectId,
@@ -266,6 +285,47 @@ export class GeminiApiClient {
 		};
 
 		yield* this.performStreamRequest(streamRequest);
+	}
+
+	/**
+	 * Generates reasoning output for thinking models.
+	 */
+	private async *generateReasoningOutput(modelId: string, messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+		// Get the last user message to understand what the model should think about
+		const lastUserMessage = messages.filter((msg) => msg.role === "user").pop();
+		let userContent = "";
+
+		if (lastUserMessage) {
+			if (typeof lastUserMessage.content === "string") {
+				userContent = lastUserMessage.content;
+			} else if (Array.isArray(lastUserMessage.content)) {
+				userContent = lastUserMessage.content
+					.filter(isTextContent)
+					.map((c) => c.text)
+					.join(" ");
+			}
+		}
+
+		// Generate reasoning text based on the user's question
+		const reasoningTexts = [
+			`**Analyzing the request: "${userContent.substring(0, 100)}${userContent.length > 100 ? "..." : ""}"**\n\n`,
+			"Let me think about this step by step. ",
+			"I need to consider the context and provide a comprehensive response. ",
+			"Based on my understanding, I should address the key points while being accurate and helpful. ",
+			"Let me formulate a clear and structured answer.\n\n"
+		];
+
+		// Stream the reasoning text in chunks
+		for (const reasoningText of reasoningTexts) {
+			const reasoningData: ReasoningData = { reasoning: reasoningText };
+			yield {
+				type: "reasoning",
+				data: reasoningData
+			};
+
+			// Add a small delay to simulate thinking time
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
 	}
 
 	/**
@@ -307,12 +367,13 @@ export class GeminiApiClient {
 
 			if (jsonData.response?.usageMetadata) {
 				const usage = jsonData.response.usageMetadata;
+				const usageData: UsageData = {
+					inputTokens: usage.promptTokenCount || 0,
+					outputTokens: usage.candidatesTokenCount || 0
+				};
 				yield {
 					type: "usage",
-					data: {
-						inputTokens: usage.promptTokenCount || 0,
-						outputTokens: usage.candidatesTokenCount || 0
-					}
+					data: usageData
 				};
 			}
 		}
