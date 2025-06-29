@@ -4,7 +4,7 @@
 
 // Static reasoning messages for thinking models
 export const REASONING_MESSAGES = [
-	"🔍 **Analyzing the request: \"{requestPreview}\"**\n\n",
+	'🔍 **Analyzing the request: "{requestPreview}"**\n\n',
 	"🤔 Let me think about this step by step... ",
 	"💭 I need to consider the context and provide a comprehensive response. ",
 	"🎯 Based on my understanding, I should address the key points while being accurate and helpful. ",

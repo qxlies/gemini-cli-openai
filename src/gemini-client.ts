@@ -282,9 +282,7 @@ export class GeminiApiClient {
 
 		// Generate reasoning text based on the user's question using constants
 		const requestPreview = userContent.substring(0, 100) + (userContent.length > 100 ? "..." : "");
-		const reasoningTexts = REASONING_MESSAGES.map(msg => 
-			msg.replace("{requestPreview}", requestPreview)
-		);
+		const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
 
 		// Stream the reasoning text in chunks
 		for (const reasoningText of reasoningTexts) {
