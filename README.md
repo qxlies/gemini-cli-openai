@@ -520,6 +520,7 @@ You can include multiple images in a single message:
 - This simulates the thinking process similar to OpenAI's o3 model behavior, showing the model's reasoning steps
 - By default, reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
 - When `STREAM_THINKING_AS_CONTENT` is also set to "true", reasoning will be streamed as regular content wrapped in `<thinking></thinking>` tags (DeepSeek R1 style)
+- **Optimized UX**: The `</thinking>` tag is only sent when the actual LLM response begins, eliminating awkward pauses between thinking and response
 - If not set or set to any value other than "true", thinking models will behave like regular models
 
 ### KV Namespaces
