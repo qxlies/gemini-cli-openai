@@ -1,7 +1,7 @@
 import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
-import { REASONING_MESSAGES, REASONING_CHUNK_DELAY } from "./constants";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
 
@@ -240,10 +240,13 @@ export class GeminiApiClient {
 		// Check if this is a thinking model and if fake thinking is enabled
 		const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
 		const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
+		const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
 
 		// For thinking models, emit reasoning before the actual response (only if fake thinking is enabled)
+		let needsThinkingClose = false;
 		if (isThinkingModel && isFakeThinkingEnabled) {
-			yield* this.generateReasoningOutput(modelId, messages);
+			yield* this.generateReasoningOutput(modelId, messages, streamThinkingAsContent);
+			needsThinkingClose = streamThinkingAsContent; // Only need to close if we streamed as content
 		}
 
 		const streamRequest = {
@@ -258,13 +261,17 @@ export class GeminiApiClient {
 			}
 		};
 
-		yield* this.performStreamRequest(streamRequest);
+		yield* this.performStreamRequest(streamRequest, needsThinkingClose);
 	}
 
 	/**
 	 * Generates reasoning output for thinking models.
 	 */
-	private async *generateReasoningOutput(modelId: string, messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+	private async *generateReasoningOutput(
+		modelId: string,
+		messages: ChatMessage[],
+		streamAsContent: boolean = false
+	): AsyncGenerator<StreamChunk> {
 		// Get the last user message to understand what the model should think about
 		const lastUserMessage = messages.filter((msg) => msg.role === "user").pop();
 		let userContent = "";
@@ -282,25 +289,85 @@ export class GeminiApiClient {
 
 		// Generate reasoning text based on the user's question using constants
 		const requestPreview = userContent.substring(0, 100) + (userContent.length > 100 ? "..." : "");
-		const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
 
-		// Stream the reasoning text in chunks
-		for (const reasoningText of reasoningTexts) {
-			const reasoningData: ReasoningData = { reasoning: reasoningText };
+		if (streamAsContent) {
+			// DeepSeek R1 style: stream thinking as content with <thinking> tags
 			yield {
-				type: "reasoning",
-				data: reasoningData
+				type: "thinking_content",
+				data: "<thinking>\n"
 			};
 
-			// Add a small delay to simulate thinking time
-			await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY));
+			// Add a small delay after opening tag
+			await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY)); // Stream reasoning content in smaller chunks for more realistic streaming
+			const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
+			const fullReasoningText = reasoningTexts.join("");
+
+			// Split into smaller chunks for more realistic streaming
+			// Try to split on word boundaries when possible for better readability
+			const chunks: string[] = [];
+			let remainingText = fullReasoningText;
+
+			while (remainingText.length > 0) {
+				if (remainingText.length <= THINKING_CONTENT_CHUNK_SIZE) {
+					chunks.push(remainingText);
+					break;
+				}
+
+				// Try to find a good break point (space, newline, punctuation)
+				let chunkEnd = THINKING_CONTENT_CHUNK_SIZE;
+				const searchSpace = remainingText.substring(0, chunkEnd + 10); // Look a bit ahead
+				const goodBreaks = [" ", "\n", ".", ",", "!", "?", ";", ":"];
+
+				for (const breakChar of goodBreaks) {
+					const lastBreak = searchSpace.lastIndexOf(breakChar);
+					if (lastBreak > THINKING_CONTENT_CHUNK_SIZE * 0.7) {
+						// Don't make chunks too small
+						chunkEnd = lastBreak + 1;
+						break;
+					}
+				}
+
+				chunks.push(remainingText.substring(0, chunkEnd));
+				remainingText = remainingText.substring(chunkEnd);
+			}
+
+			for (const chunk of chunks) {
+				yield {
+					type: "thinking_content",
+					data: chunk
+				};
+
+				// Add small delay between chunks
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+
+			// Note: We don't close the thinking tag here - it will be closed when real content starts
+		} else {
+			// Original mode: stream as reasoning field
+			const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
+
+			// Stream the reasoning text in chunks
+			for (const reasoningText of reasoningTexts) {
+				const reasoningData: ReasoningData = { reasoning: reasoningText };
+				yield {
+					type: "reasoning",
+					data: reasoningData
+				};
+
+				// Add a small delay to simulate thinking time
+				await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY));
+			}
 		}
 	}
 
 	/**
 	 * Performs the actual stream request with retry logic for 401 errors.
 	 */
-	private async *performStreamRequest(streamRequest: unknown, isRetry: boolean = false): AsyncGenerator<StreamChunk> {
+	private async *performStreamRequest(
+		streamRequest: unknown,
+		needsThinkingClose: boolean = false,
+		isRetry: boolean = false
+	): AsyncGenerator<StreamChunk> {
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
 			method: "POST",
 			headers: {
@@ -315,7 +382,7 @@ export class GeminiApiClient {
 				console.log("Got 401 error in stream request, clearing token cache and retrying...");
 				await this.authManager.clearTokenCache();
 				await this.authManager.initializeAuth();
-				yield* this.performStreamRequest(streamRequest, true); // Retry once
+				yield* this.performStreamRequest(streamRequest, needsThinkingClose, true); // Retry once
 				return;
 			}
 			const errorText = await response.text();
@@ -327,10 +394,21 @@ export class GeminiApiClient {
 			throw new Error("Response has no body");
 		}
 
+		let hasClosedThinking = false;
 		for await (const jsonData of this.parseSSEStream(response.body)) {
 			const candidate = jsonData.response?.candidates?.[0];
 			if (candidate?.content?.parts?.[0]?.text) {
 				const content = candidate.content.parts[0].text;
+
+				// Close thinking tag before first real content if needed
+				if (needsThinkingClose && !hasClosedThinking) {
+					yield {
+						type: "thinking_content",
+						data: "\n</thinking>\n\n"
+					};
+					hasClosedThinking = true;
+				}
+
 				yield { type: "text", data: content };
 			}
 
