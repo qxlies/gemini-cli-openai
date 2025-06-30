@@ -16,3 +16,8 @@ OPENAI_API_KEY=sk-your-secret-api-key-here
 # When enabled, models marked with thinking: true will generate synthetic reasoning text
 # before providing their actual response, similar to OpenAI's o3 model behavior
 ENABLE_FAKE_THINKING=true
+
+# Optional: Stream thinking as content with <thinking> tags (DeepSeek R1 style)
+# When enabled along with ENABLE_FAKE_THINKING, reasoning will be streamed as regular content
+# wrapped in <thinking></thinking> tags instead of using the reasoning field
+STREAM_THINKING_AS_CONTENT=true

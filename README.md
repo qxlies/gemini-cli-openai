@@ -22,7 +22,7 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 | `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
 | `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
 
-> **Note:** Thinking support requires `ENABLE_FAKE_THINKING=true` environment variable. When enabled, these models will show their reasoning process before providing the final answer.
+> **Note:** Thinking support requires `ENABLE_FAKE_THINKING=true` environment variable. When enabled, these models will show their reasoning process before providing the final answer. Set `STREAM_THINKING_AS_CONTENT=true` to stream reasoning as content with `<thinking>` tags (DeepSeek R1 style).
 
 ## 🏗️ How It Works
 
@@ -281,6 +281,33 @@ for await (const chunk of stream) {
 3. **Start chatting**:
    Use any Gemini model just like you would with OpenAI models!
 
+### LiteLLM Integration
+
+[LiteLLM](https://github.com/BerriAI/litellm) works seamlessly with this worker, especially when using the DeepSeek R1-style thinking streams:
+
+```python
+import litellm
+
+# Configure LiteLLM to use your worker
+litellm.api_base = "https://your-worker.workers.dev/v1"
+litellm.api_key = "sk-your-secret-api-key-here"
+
+# Use thinking models with LiteLLM
+response = litellm.completion(
+    model="gemini-2.5-flash",
+    messages=[
+        {"role": "user", "content": "Solve this step by step: What is 15 * 24?"}
+    ],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+**Pro Tip**: Set `STREAM_THINKING_AS_CONTENT=true` for optimal LiteLLM compatibility. The `<thinking>` tags format works better with LiteLLM's parsing and various downstream tools.
+
 ### cURL
 ```bash
 curl -X POST https://your-worker.workers.dev/v1/chat/completions \
@@ -480,6 +507,7 @@ You can include multiple images in a single message:
 | `GEMINI_PROJECT_ID` | ❌ | Google Cloud Project ID (auto-discovered if not set) |
 | `OPENAI_API_KEY` | ❌ | API key for authentication (if not set, API is public) |
 | `ENABLE_FAKE_THINKING` | ❌ | Enable synthetic thinking output for thinking models (set to "true" to enable) |
+| `STREAM_THINKING_AS_CONTENT` | ❌ | Stream thinking as content with `<thinking>` tags (DeepSeek R1 style) |
 
 **Authentication Security:**
 - When `OPENAI_API_KEY` is set, all `/v1/*` endpoints require authentication
@@ -490,7 +518,8 @@ You can include multiple images in a single message:
 **Thinking Models:**
 - When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
 - This simulates the thinking process similar to OpenAI's o3 model behavior, showing the model's reasoning steps
-- The reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
+- By default, reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
+- When `STREAM_THINKING_AS_CONTENT` is also set to "true", reasoning will be streamed as regular content wrapped in `<thinking></thinking>` tags (DeepSeek R1 style)
 - If not set or set to any value other than "true", thinking models will behave like regular models
 
 ### KV Namespaces

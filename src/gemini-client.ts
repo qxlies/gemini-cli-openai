@@ -240,10 +240,11 @@ export class GeminiApiClient {
 		// Check if this is a thinking model and if fake thinking is enabled
 		const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
 		const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
+		const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
 
 		// For thinking models, emit reasoning before the actual response (only if fake thinking is enabled)
 		if (isThinkingModel && isFakeThinkingEnabled) {
-			yield* this.generateReasoningOutput(modelId, messages);
+			yield* this.generateReasoningOutput(modelId, messages, streamThinkingAsContent);
 		}
 
 		const streamRequest = {
@@ -264,7 +265,11 @@ export class GeminiApiClient {
 	/**
 	 * Generates reasoning output for thinking models.
 	 */
-	private async *generateReasoningOutput(modelId: string, messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+	private async *generateReasoningOutput(
+		modelId: string,
+		messages: ChatMessage[],
+		streamAsContent: boolean = false
+	): AsyncGenerator<StreamChunk> {
 		// Get the last user message to understand what the model should think about
 		const lastUserMessage = messages.filter((msg) => msg.role === "user").pop();
 		let userContent = "";
@@ -282,18 +287,54 @@ export class GeminiApiClient {
 
 		// Generate reasoning text based on the user's question using constants
 		const requestPreview = userContent.substring(0, 100) + (userContent.length > 100 ? "..." : "");
-		const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
 
-		// Stream the reasoning text in chunks
-		for (const reasoningText of reasoningTexts) {
-			const reasoningData: ReasoningData = { reasoning: reasoningText };
+		if (streamAsContent) {
+			// DeepSeek R1 style: stream thinking as content with <thinking> tags
 			yield {
-				type: "reasoning",
-				data: reasoningData
+				type: "thinking_content",
+				data: "<thinking>\n"
 			};
 
-			// Add a small delay to simulate thinking time
+			// Add a small delay after opening tag
 			await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY));
+
+			// Stream reasoning content in smaller chunks for more realistic streaming
+			const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
+			const fullReasoningText = reasoningTexts.join("");
+
+			// Split into smaller chunks for more realistic streaming
+			const chunks = fullReasoningText.match(/.{1,10}/g) || [fullReasoningText];
+
+			for (const chunk of chunks) {
+				yield {
+					type: "thinking_content",
+					data: chunk
+				};
+
+				// Add small delay between chunks
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+
+			// Close thinking tag
+			yield {
+				type: "thinking_content",
+				data: "\n</thinking>\n\n"
+			};
+		} else {
+			// Original mode: stream as reasoning field
+			const reasoningTexts = REASONING_MESSAGES.map((msg) => msg.replace("{requestPreview}", requestPreview));
+
+			// Stream the reasoning text in chunks
+			for (const reasoningText of reasoningTexts) {
+				const reasoningData: ReasoningData = { reasoning: reasoningText };
+				yield {
+					type: "reasoning",
+					data: reasoningData
+				};
+
+				// Add a small delay to simulate thinking time
+				await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY));
+			}
 		}
 	}
 
