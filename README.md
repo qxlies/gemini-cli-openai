@@ -415,6 +415,22 @@ for chunk in response:
 
 **Pro Tip**: Set `STREAM_THINKING_AS_CONTENT=true` for optimal LiteLLM compatibility. The `<thinking>` tags format works better with LiteLLM's parsing and various downstream tools.
 
+### Cline Integration
+
+[Cline](https://github.com/cline/cline) is a powerful AI assistant extension for VS Code. You can easily configure it to use your Gemini models:
+
+1. **Install Cline** in VS Code from the Extensions marketplace
+
+2. **Configure OpenAI API settings**:
+   - Open Cline settings
+   - Set **API Provider** to "OpenAI"
+   - Set **Base URL** to: `https://your-worker.workers.dev/v1`
+   - Set **API Key** to: `sk-your-secret-api-key-here` (use your OPENAI_API_KEY if authentication is enabled)
+
+3. **Select a model**:
+   - Choose `gemini-2.5-pro` for complex reasoning tasks
+   - Choose `gemini-2.5-flash` for faster responses
+
 ### cURL
 ```bash
 curl -X POST https://your-worker.workers.dev/v1/chat/completions \
