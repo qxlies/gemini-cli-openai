@@ -36,28 +36,6 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 > 
 > Set `STREAM_THINKING_AS_CONTENT=true` to stream reasoning as content with `<thinking>` tags (DeepSeek R1 style) instead of using the reasoning field.
 
-## 🏗️ How It Works
-
-```mermaid
-graph TD
-    A[Client Request] --> B[Cloudflare Worker]
-    B --> C{Token in KV Cache?}
-    C -->|Yes| D[Use Cached Token]
-    C -->|No| E[Check Environment Token]
-    E --> F{Token Valid?}
-    F -->|Yes| G[Cache & Use Token]
-    F -->|No| H[Refresh Token]
-    H --> I[Cache New Token]
-    D --> J[Call Gemini API]
-    G --> J
-    I --> J
-    J --> K[Stream Response]
-    K --> L[OpenAI Format]
-    L --> M[Client Response]
-```
-
-The worker acts as a translation layer, converting OpenAI API calls to Google's Code Assist API format while managing OAuth2 authentication automatically.
-
 ## 🛠️ Setup
 
 ### Prerequisites
@@ -161,6 +139,81 @@ npm run deploy
 # Or run locally for development
 npm run dev
 ```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GCP_SERVICE_ACCOUNT` | ✅ | OAuth2 credentials JSON string |
+| `GEMINI_PROJECT_ID` | ❌ | Google Cloud Project ID (auto-discovered if not set) |
+| `OPENAI_API_KEY` | ❌ | API key for authentication (if not set, API is public) |
+| `ENABLE_FAKE_THINKING` | ❌ | Enable synthetic thinking output for thinking models (set to "true" to enable) |
+| `ENABLE_REAL_THINKING` | ❌ | Enable real Gemini thinking output (set to "true" to enable) |
+| `STREAM_THINKING_AS_CONTENT` | ❌ | Stream thinking as content with `<thinking>` tags (DeepSeek R1 style) |
+
+**Authentication Security:**
+- When `OPENAI_API_KEY` is set, all `/v1/*` endpoints require authentication
+- Clients must include the header: `Authorization: Bearer <your-api-key>`
+- Without this environment variable, the API is publicly accessible
+- Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
+
+**Thinking Models:**
+- **Fake Thinking**: When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
+- **Real Thinking**: When `ENABLE_REAL_THINKING` is set to "true", requests with `include_reasoning: true` will use Gemini's native thinking capabilities
+- Real thinking provides genuine reasoning from Gemini and requires thinking-capable models (like Gemini 2.5 Pro/Flash)
+- You can control the reasoning token budget with the `thinking_budget` parameter
+- By default, reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
+- When `STREAM_THINKING_AS_CONTENT` is also set to "true", reasoning will be streamed as regular content wrapped in `<thinking></thinking>` tags (DeepSeek R1 style)
+- **Optimized UX**: The `</thinking>` tag is only sent when the actual LLM response begins, eliminating awkward pauses between thinking and response
+- If neither thinking mode is enabled, thinking models will behave like regular models
+
+### KV Namespaces
+
+| Binding | Purpose |
+|---------|---------|
+| `GEMINI_CLI_KV` | Token caching and session management |
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+**401 Authentication Error**
+- Check if your OAuth2 credentials are valid
+- Ensure the refresh token is working
+- Verify the credentials format matches exactly
+
+**Token Refresh Failed**
+- Credentials might be from wrong OAuth2 client
+- Refresh token might be expired or revoked
+- Check the debug cache endpoint for token status
+
+**Project ID Discovery Failed**
+- Set `GEMINI_PROJECT_ID` environment variable manually
+- Ensure your Google account has access to Gemini
+
+## 🏗️ How It Works
+
+```mermaid
+graph TD
+    A[Client Request] --> B[Cloudflare Worker]
+    B --> C{Token in KV Cache?}
+    C -->|Yes| D[Use Cached Token]
+    C -->|No| E[Check Environment Token]
+    E --> F{Token Valid?}
+    F -->|Yes| G[Cache & Use Token]
+    F -->|No| H[Refresh Token]
+    H --> I[Cache New Token]
+    D --> J[Call Gemini API]
+    G --> J
+    I --> J
+    J --> K[Stream Response]
+    K --> L[OpenAI Format]
+    L --> M[Client Response]
+```
+
+The worker acts as a translation layer, converting OpenAI API calls to Google's Code Assist API format while managing OAuth2 authentication automatically.
 
 ## 📡 API Endpoints
 
@@ -550,59 +603,6 @@ You can include multiple images in a single message:
   ]
 }
 ```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GCP_SERVICE_ACCOUNT` | ✅ | OAuth2 credentials JSON string |
-| `GEMINI_PROJECT_ID` | ❌ | Google Cloud Project ID (auto-discovered if not set) |
-| `OPENAI_API_KEY` | ❌ | API key for authentication (if not set, API is public) |
-| `ENABLE_FAKE_THINKING` | ❌ | Enable synthetic thinking output for thinking models (set to "true" to enable) |
-| `ENABLE_REAL_THINKING` | ❌ | Enable real Gemini thinking output (set to "true" to enable) |
-| `STREAM_THINKING_AS_CONTENT` | ❌ | Stream thinking as content with `<thinking>` tags (DeepSeek R1 style) |
-
-**Authentication Security:**
-- When `OPENAI_API_KEY` is set, all `/v1/*` endpoints require authentication
-- Clients must include the header: `Authorization: Bearer <your-api-key>`
-- Without this environment variable, the API is publicly accessible
-- Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
-
-**Thinking Models:**
-- **Fake Thinking**: When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
-- **Real Thinking**: When `ENABLE_REAL_THINKING` is set to "true", requests with `include_reasoning: true` will use Gemini's native thinking capabilities
-- Real thinking provides genuine reasoning from Gemini and requires thinking-capable models (like Gemini 2.5 Pro/Flash)
-- You can control the reasoning token budget with the `thinking_budget` parameter
-- By default, reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
-- When `STREAM_THINKING_AS_CONTENT` is also set to "true", reasoning will be streamed as regular content wrapped in `<thinking></thinking>` tags (DeepSeek R1 style)
-- **Optimized UX**: The `</thinking>` tag is only sent when the actual LLM response begins, eliminating awkward pauses between thinking and response
-- If neither thinking mode is enabled, thinking models will behave like regular models
-
-### KV Namespaces
-
-| Binding | Purpose |
-|---------|---------|
-| `GEMINI_CLI_KV` | Token caching and session management |
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**401 Authentication Error**
-- Check if your OAuth2 credentials are valid
-- Ensure the refresh token is working
-- Verify the credentials format matches exactly
-
-**Token Refresh Failed**
-- Credentials might be from wrong OAuth2 client
-- Refresh token might be expired or revoked
-- Check the debug cache endpoint for token status
-
-**Project ID Discovery Failed**
-- Set `GEMINI_PROJECT_ID` environment variable manually
-- Ensure your Google account has access to Gemini
 
 ### Debug Commands
 
