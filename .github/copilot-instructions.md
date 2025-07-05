@@ -92,7 +92,7 @@ npm run format:check # Check if code is properly formatted
 // ❌ Bad - magic numbers
 const generationConfig = {
   temperature: 0.7,
-  thinkingBudget: 2048
+  thinkingBudget: -1
 };
 
 // ✅ Good - using constants

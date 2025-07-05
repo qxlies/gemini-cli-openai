@@ -229,7 +229,7 @@ Content-Type: application/json
 }
 ```
 
-The `include_reasoning` parameter enables Gemini's native thinking mode, and `thinking_budget` sets the token limit for reasoning (defaults to 2048).
+The `include_reasoning` parameter enables Gemini's native thinking mode, and `thinking_budget` sets the token limit for reasoning.
 
 **Response (Streaming):**
 ```
@@ -574,7 +574,7 @@ You can include multiple images in a single message:
 - **Fake Thinking**: When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
 - **Real Thinking**: When `ENABLE_REAL_THINKING` is set to "true", requests with `include_reasoning: true` will use Gemini's native thinking capabilities
 - Real thinking provides genuine reasoning from Gemini and requires thinking-capable models (like Gemini 2.5 Pro/Flash)
-- You can control the reasoning token budget with the `thinking_budget` parameter (defaults to 2048)
+- You can control the reasoning token budget with the `thinking_budget` parameter
 - By default, reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
 - When `STREAM_THINKING_AS_CONTENT` is also set to "true", reasoning will be streamed as regular content wrapped in `<thinking></thinking>` tags (DeepSeek R1 style)
 - **Optimized UX**: The `</thinking>` tag is only sent when the actual LLM response begins, eliminating awkward pauses between thinking and response
