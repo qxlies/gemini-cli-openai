@@ -24,7 +24,17 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 | `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
 | `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
 
-> **Note:** Thinking support requires `ENABLE_FAKE_THINKING=true` environment variable. When enabled, these models will show their reasoning process before providing the final answer. Set `STREAM_THINKING_AS_CONTENT=true` to stream reasoning as content with `<thinking>` tags (DeepSeek R1 style).
+> **Note:** Gemini 2.5 models have thinking enabled by default. The API automatically manages this:
+> - When real thinking is disabled (environment), thinking budget is set to 0 to disable it
+> - When real thinking is enabled (environment), thinking budget defaults to -1 (dynamic allocation by Gemini)
+>
+> **Thinking support** has two modes:
+> - **Fake thinking**: Set `ENABLE_FAKE_THINKING=true` to generate synthetic reasoning text (good for testing)
+> - **Real thinking**: Set `ENABLE_REAL_THINKING=true` to use Gemini's native reasoning capabilities
+> 
+> Real thinking is controlled entirely by the `ENABLE_REAL_THINKING` environment variable. You can optionally set a `"thinking_budget"` in your request (token limit for reasoning, -1 for dynamic allocation).
+> 
+> Set `STREAM_THINKING_AS_CONTENT=true` to stream reasoning as content with `<thinking>` tags (DeepSeek R1 style) instead of using the reasoning field.
 
 ## 🏗️ How It Works
 
@@ -199,6 +209,28 @@ Content-Type: application/json
 }
 ```
 
+#### Thinking Mode (Real Reasoning)
+For models that support thinking, you can enable real reasoning from Gemini:
+
+```http
+POST /v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "gemini-2.5-pro",
+  "messages": [
+    {
+      "role": "user", 
+      "content": "Solve this math problem step by step: What is 15% of 240?"
+    }
+  ],
+  "include_reasoning": true,
+  "thinking_budget": 1024
+}
+```
+
+The `include_reasoning` parameter enables Gemini's native thinking mode, and `thinking_budget` sets the token limit for reasoning (defaults to 2048).
+
 **Response (Streaming):**
 ```
 data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1708976947,"model":"gemini-2.5-flash","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
@@ -244,6 +276,26 @@ response = client.chat.completions.create(
 )
 
 for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+
+# Real thinking mode
+response = client.chat.completions.create(
+    model="gemini-2.5-pro",
+    messages=[
+        {"role": "user", "content": "Solve this step by step: What is the derivative of x^3 + 2x^2 - 5x + 3?"}
+    ],
+    extra_body={
+        "include_reasoning": True,
+        "thinking_budget": 1024
+    },
+    stream=True
+)
+
+for chunk in response:
+    # Real thinking appears in the reasoning field
+    if hasattr(chunk.choices[0].delta, 'reasoning') and chunk.choices[0].delta.reasoning:
+        print(f"[Thinking] {chunk.choices[0].delta.reasoning}")
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
@@ -509,6 +561,7 @@ You can include multiple images in a single message:
 | `GEMINI_PROJECT_ID` | ❌ | Google Cloud Project ID (auto-discovered if not set) |
 | `OPENAI_API_KEY` | ❌ | API key for authentication (if not set, API is public) |
 | `ENABLE_FAKE_THINKING` | ❌ | Enable synthetic thinking output for thinking models (set to "true" to enable) |
+| `ENABLE_REAL_THINKING` | ❌ | Enable real Gemini thinking output (set to "true" to enable) |
 | `STREAM_THINKING_AS_CONTENT` | ❌ | Stream thinking as content with `<thinking>` tags (DeepSeek R1 style) |
 
 **Authentication Security:**
@@ -518,12 +571,14 @@ You can include multiple images in a single message:
 - Recommended format: `sk-` followed by a random string (e.g., `sk-1234567890abcdef...`)
 
 **Thinking Models:**
-- When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
-- This simulates the thinking process similar to OpenAI's o3 model behavior, showing the model's reasoning steps
+- **Fake Thinking**: When `ENABLE_FAKE_THINKING` is set to "true", models marked with `thinking: true` will generate synthetic reasoning text before their actual response
+- **Real Thinking**: When `ENABLE_REAL_THINKING` is set to "true", requests with `include_reasoning: true` will use Gemini's native thinking capabilities
+- Real thinking provides genuine reasoning from Gemini and requires thinking-capable models (like Gemini 2.5 Pro/Flash)
+- You can control the reasoning token budget with the `thinking_budget` parameter (defaults to 2048)
 - By default, reasoning output is streamed as `reasoning` chunks in the OpenAI-compatible response format
 - When `STREAM_THINKING_AS_CONTENT` is also set to "true", reasoning will be streamed as regular content wrapped in `<thinking></thinking>` tags (DeepSeek R1 style)
 - **Optimized UX**: The `</thinking>` tag is only sent when the actual LLM response begins, eliminating awkward pauses between thinking and response
-- If not set or set to any value other than "true", thinking models will behave like regular models
+- If neither thinking mode is enabled, thinking models will behave like regular models
 
 ### KV Namespaces
 
