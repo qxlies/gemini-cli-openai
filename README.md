@@ -193,27 +193,206 @@ npm run dev
 - Set `GEMINI_PROJECT_ID` environment variable manually
 - Ensure your Google account has access to Gemini
 
-## 🏗️ How It Works
+## 💻 Usage Examples
 
-```mermaid
-graph TD
-    A[Client Request] --> B[Cloudflare Worker]
-    B --> C{Token in KV Cache?}
-    C -->|Yes| D[Use Cached Token]
-    C -->|No| E[Check Environment Token]
-    E --> F{Token Valid?}
-    F -->|Yes| G[Cache & Use Token]
-    F -->|No| H[Refresh Token]
-    H --> I[Cache New Token]
-    D --> J[Call Gemini API]
-    G --> J
-    I --> J
-    J --> K[Stream Response]
-    K --> L[OpenAI Format]
-    L --> M[Client Response]
+### Cline Integration
+
+[Cline](https://github.com/cline/cline) is a powerful AI assistant extension for VS Code. You can easily configure it to use your Gemini models:
+
+1. **Install Cline** in VS Code from the Extensions marketplace
+
+2. **Configure OpenAI API settings**:
+   - Open Cline settings
+   - Set **API Provider** to "OpenAI"
+   - Set **Base URL** to: `https://your-worker.workers.dev/v1`
+   - Set **API Key** to: `sk-your-secret-api-key-here` (use your OPENAI_API_KEY if authentication is enabled)
+
+3. **Select a model**:
+   - Choose `gemini-2.5-pro` for complex reasoning tasks
+   - Choose `gemini-2.5-flash` for faster responses
+
+### Open WebUI Integration
+
+1. **Add as OpenAI-compatible endpoint**:
+   - Base URL: `https://your-worker.workers.dev/v1`
+   - API Key: `sk-your-secret-api-key-here` (use your OPENAI_API_KEY if authentication is enabled)
+
+2. **Configure models**:
+   Open WebUI will automatically discover available Gemini models through the `/v1/models` endpoint.
+
+3. **Start chatting**:
+   Use any Gemini model just like you would with OpenAI models!
+
+### LiteLLM Integration
+
+[LiteLLM](https://github.com/BerriAI/litellm) works seamlessly with this worker, especially when using the DeepSeek R1-style thinking streams:
+
+```python
+import litellm
+
+# Configure LiteLLM to use your worker
+litellm.api_base = "https://your-worker.workers.dev/v1"
+litellm.api_key = "sk-your-secret-api-key-here"
+
+# Use thinking models with LiteLLM
+response = litellm.completion(
+    model="gemini-2.5-flash",
+    messages=[
+        {"role": "user", "content": "Solve this step by step: What is 15 * 24?"}
+    ],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
 ```
 
-The worker acts as a translation layer, converting OpenAI API calls to Google's Code Assist API format while managing OAuth2 authentication automatically.
+**Pro Tip**: Set `STREAM_THINKING_AS_CONTENT=true` for optimal LiteLLM compatibility. The `<thinking>` tags format works better with LiteLLM's parsing and various downstream tools.
+
+### OpenAI SDK (Python)
+```python
+from openai import OpenAI
+
+# Initialize with your worker endpoint
+client = OpenAI(
+    base_url="https://your-worker.workers.dev/v1",
+    api_key="sk-your-secret-api-key-here"  # Use your OPENAI_API_KEY if authentication is enabled
+)
+
+# Chat completion
+response = client.chat.completions.create(
+    model="gemini-2.5-flash",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Explain machine learning in simple terms"}
+    ],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+
+# Real thinking mode
+response = client.chat.completions.create(
+    model="gemini-2.5-pro",
+    messages=[
+        {"role": "user", "content": "Solve this step by step: What is the derivative of x^3 + 2x^2 - 5x + 3?"}
+    ],
+    extra_body={
+        "include_reasoning": True,
+        "thinking_budget": 1024
+    },
+    stream=True
+)
+
+for chunk in response:
+    # Real thinking appears in the reasoning field
+    if hasattr(chunk.choices[0].delta, 'reasoning') and chunk.choices[0].delta.reasoning:
+        print(f"[Thinking] {chunk.choices[0].delta.reasoning}")
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+### OpenAI SDK (JavaScript/TypeScript)
+```typescript
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  baseURL: 'https://your-worker.workers.dev/v1',
+  apiKey: 'sk-your-secret-api-key-here', // Use your OPENAI_API_KEY if authentication is enabled
+});
+
+const stream = await openai.chat.completions.create({
+  model: 'gemini-2.5-flash',
+  messages: [
+    { role: 'user', content: 'Write a haiku about coding' }
+  ],
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  const content = chunk.choices[0]?.delta?.content || '';
+  process.stdout.write(content);
+}
+```
+
+### cURL
+```bash
+curl -X POST https://your-worker.workers.dev/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-secret-api-key-here" \
+  -d '{
+    "model": "gemini-2.5-flash",
+    "messages": [
+      {"role": "user", "content": "Explain quantum computing"}
+    ]
+  }'
+```
+
+### Raw JavaScript/TypeScript
+```javascript
+const response = await fetch('https://your-worker.workers.dev/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    model: 'gemini-2.5-flash',
+    messages: [
+      { role: 'user', content: 'Hello, world!' }
+    ]
+  })
+});
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  
+  const chunk = decoder.decode(value);
+  const lines = chunk.split('\n');
+  
+  for (const line of lines) {
+    if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+      const data = JSON.parse(line.substring(6));
+      const content = data.choices[0]?.delta?.content;
+      if (content) {
+        console.log(content);
+      }
+    }
+  }
+}
+```
+
+### Raw Python (without SDK)
+```python
+import requests
+import json
+
+url = "https://your-worker.workers.dev/v1/chat/completions"
+data = {
+    "model": "gemini-2.5-flash",
+    "messages": [
+        {"role": "user", "content": "Write a Python function to calculate fibonacci"}
+    ]
+}
+
+response = requests.post(url, json=data, stream=True)
+
+for line in response.iter_lines():
+    if line and line.startswith(b'data: '):
+        try:
+            chunk = json.loads(line[6:].decode())
+            content = chunk['choices'][0]['delta'].get('content', '')
+            if content:
+                print(content, end='')
+        except json.JSONDecodeError:
+            continue
+```
 
 ## 📡 API Endpoints
 
@@ -304,207 +483,6 @@ GET /v1/debug/cache
 ```http
 POST /v1/token-test
 POST /v1/test
-```
-
-## 💻 Usage Examples
-
-### OpenAI SDK (Python)
-```python
-from openai import OpenAI
-
-# Initialize with your worker endpoint
-client = OpenAI(
-    base_url="https://your-worker.workers.dev/v1",
-    api_key="sk-your-secret-api-key-here"  # Use your OPENAI_API_KEY if authentication is enabled
-)
-
-# Chat completion
-response = client.chat.completions.create(
-    model="gemini-2.5-flash",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Explain machine learning in simple terms"}
-    ],
-    stream=True
-)
-
-for chunk in response:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-
-# Real thinking mode
-response = client.chat.completions.create(
-    model="gemini-2.5-pro",
-    messages=[
-        {"role": "user", "content": "Solve this step by step: What is the derivative of x^3 + 2x^2 - 5x + 3?"}
-    ],
-    extra_body={
-        "include_reasoning": True,
-        "thinking_budget": 1024
-    },
-    stream=True
-)
-
-for chunk in response:
-    # Real thinking appears in the reasoning field
-    if hasattr(chunk.choices[0].delta, 'reasoning') and chunk.choices[0].delta.reasoning:
-        print(f"[Thinking] {chunk.choices[0].delta.reasoning}")
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-```
-
-### OpenAI SDK (JavaScript/TypeScript)
-```typescript
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  baseURL: 'https://your-worker.workers.dev/v1',
-  apiKey: 'sk-your-secret-api-key-here', // Use your OPENAI_API_KEY if authentication is enabled
-});
-
-const stream = await openai.chat.completions.create({
-  model: 'gemini-2.5-flash',
-  messages: [
-    { role: 'user', content: 'Write a haiku about coding' }
-  ],
-  stream: true,
-});
-
-for await (const chunk of stream) {
-  const content = chunk.choices[0]?.delta?.content || '';
-  process.stdout.write(content);
-}
-```
-
-### Open WebUI Integration
-
-1. **Add as OpenAI-compatible endpoint**:
-   - Base URL: `https://your-worker.workers.dev/v1`
-   - API Key: `sk-your-secret-api-key-here` (use your OPENAI_API_KEY if authentication is enabled)
-
-2. **Configure models**:
-   Open WebUI will automatically discover available Gemini models through the `/v1/models` endpoint.
-
-3. **Start chatting**:
-   Use any Gemini model just like you would with OpenAI models!
-
-### LiteLLM Integration
-
-[LiteLLM](https://github.com/BerriAI/litellm) works seamlessly with this worker, especially when using the DeepSeek R1-style thinking streams:
-
-```python
-import litellm
-
-# Configure LiteLLM to use your worker
-litellm.api_base = "https://your-worker.workers.dev/v1"
-litellm.api_key = "sk-your-secret-api-key-here"
-
-# Use thinking models with LiteLLM
-response = litellm.completion(
-    model="gemini-2.5-flash",
-    messages=[
-        {"role": "user", "content": "Solve this step by step: What is 15 * 24?"}
-    ],
-    stream=True
-)
-
-for chunk in response:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-```
-
-**Pro Tip**: Set `STREAM_THINKING_AS_CONTENT=true` for optimal LiteLLM compatibility. The `<thinking>` tags format works better with LiteLLM's parsing and various downstream tools.
-
-### Cline Integration
-
-[Cline](https://github.com/cline/cline) is a powerful AI assistant extension for VS Code. You can easily configure it to use your Gemini models:
-
-1. **Install Cline** in VS Code from the Extensions marketplace
-
-2. **Configure OpenAI API settings**:
-   - Open Cline settings
-   - Set **API Provider** to "OpenAI"
-   - Set **Base URL** to: `https://your-worker.workers.dev/v1`
-   - Set **API Key** to: `sk-your-secret-api-key-here` (use your OPENAI_API_KEY if authentication is enabled)
-
-3. **Select a model**:
-   - Choose `gemini-2.5-pro` for complex reasoning tasks
-   - Choose `gemini-2.5-flash` for faster responses
-
-### cURL
-```bash
-curl -X POST https://your-worker.workers.dev/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-your-secret-api-key-here" \
-  -d '{
-    "model": "gemini-2.5-flash",
-    "messages": [
-      {"role": "user", "content": "Explain quantum computing"}
-    ]
-  }'
-```
-
-### Raw JavaScript/TypeScript
-```javascript
-const response = await fetch('https://your-worker.workers.dev/v1/chat/completions', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    model: 'gemini-2.5-flash',
-    messages: [
-      { role: 'user', content: 'Hello, world!' }
-    ]
-  })
-});
-
-const reader = response.body.getReader();
-const decoder = new TextDecoder();
-
-while (true) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  
-  const chunk = decoder.decode(value);
-  const lines = chunk.split('\n');
-  
-  for (const line of lines) {
-    if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-      const data = JSON.parse(line.substring(6));
-      const content = data.choices[0]?.delta?.content;
-      if (content) {
-        console.log(content);
-      }
-    }
-  }
-}
-```
-
-### Raw Python (without SDK)
-```python
-import requests
-import json
-
-url = "https://your-worker.workers.dev/v1/chat/completions"
-data = {
-    "model": "gemini-2.5-flash",
-    "messages": [
-        {"role": "user", "content": "Write a Python function to calculate fibonacci"}
-    ]
-}
-
-response = requests.post(url, json=data, stream=True)
-
-for line in response.iter_lines():
-    if line and line.startswith(b'data: '):
-        try:
-            chunk = json.loads(line[6:].decode())
-            content = chunk['choices'][0]['delta'].get('content', '')
-            if content:
-                print(content, end='')
-        except json.JSONDecodeError:
-            continue
 ```
 
 ### Image Support (Vision)
@@ -632,6 +610,29 @@ curl -X POST https://your-worker.workers.dev/v1/token-test
 # Test full flow
 curl -X POST https://your-worker.workers.dev/v1/test
 ```
+
+
+## 🏗️ How It Works
+
+```mermaid
+graph TD
+    A[Client Request] --> B[Cloudflare Worker]
+    B --> C{Token in KV Cache?}
+    C -->|Yes| D[Use Cached Token]
+    C -->|No| E[Check Environment Token]
+    E --> F{Token Valid?}
+    F -->|Yes| G[Cache & Use Token]
+    F -->|No| H[Refresh Token]
+    H --> I[Cache New Token]
+    D --> J[Call Gemini API]
+    G --> J
+    I --> J
+    J --> K[Stream Response]
+    K --> L[OpenAI Format]
+    L --> M[Client Response]
+```
+
+The worker acts as a translation layer, converting OpenAI API calls to Google's Code Assist API format while managing OAuth2 authentication automatically.
 
 ## 🤝 Contributing
 
