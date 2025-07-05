@@ -1,7 +1,14 @@
 import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
-import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants";
+import {
+	REASONING_MESSAGES,
+	REASONING_CHUNK_DELAY,
+	THINKING_CONTENT_CHUNK_SIZE,
+	DEFAULT_THINKING_BUDGET,
+	DISABLED_THINKING_BUDGET,
+	DEFAULT_TEMPERATURE
+} from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
 
@@ -26,6 +33,7 @@ interface GeminiResponse {
 
 interface GeminiPart {
 	text?: string;
+	thought?: boolean; // For real thinking chunks from Gemini
 	inlineData?: {
 		mimeType: string;
 		data: string;
@@ -227,7 +235,15 @@ export class GeminiApiClient {
 	/**
 	 * Stream content from Gemini API.
 	 */
-	async *streamContent(modelId: string, systemPrompt: string, messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+	async *streamContent(
+		modelId: string,
+		systemPrompt: string,
+		messages: ChatMessage[],
+		options?: {
+			includeReasoning?: boolean;
+			thinkingBudget?: number;
+		}
+	): AsyncGenerator<StreamChunk> {
 		await this.authManager.initializeAuth();
 		const projectId = await this.discoverProjectId();
 
@@ -237,14 +253,41 @@ export class GeminiApiClient {
 			contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
 		}
 
-		// Check if this is a thinking model and if fake thinking is enabled
+		// Check if this is a thinking model and which thinking mode to use
 		const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
+		const isRealThinkingEnabled = this.env.ENABLE_REAL_THINKING === "true";
 		const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
 		const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
+		const includeReasoning = options?.includeReasoning || false;
 
-		// For thinking models, emit reasoning before the actual response (only if fake thinking is enabled)
+		// Build generation config
+		const generationConfig: Record<string, unknown> = {
+			temperature: DEFAULT_TEMPERATURE
+		};
+
+		// Configure thinking based on the documentation:
+		// 2.5 Flash and Pro models have thinking enabled by default
+		// Key discovery: includeThoughts: true is required to receive thinking content in the response
+		if (isThinkingModel) {
+			if (isRealThinkingEnabled && includeReasoning) {
+				// Enable thinking with custom budget (default -1 means dynamic allocation)
+				generationConfig.thinkingConfig = {
+					thinkingBudget: options?.thinkingBudget ?? DEFAULT_THINKING_BUDGET,
+					includeThoughts: true // Critical: This enables thinking content in response
+				};
+				console.log("Real thinking enabled with budget:", options?.thinkingBudget ?? DEFAULT_THINKING_BUDGET);
+			} else {
+				// Disable thinking by setting budget to 0
+				generationConfig.thinkingConfig = {
+					thinkingBudget: DISABLED_THINKING_BUDGET,
+					includeThoughts: false
+				};
+			}
+		}
+
+		// For thinking models with fake thinking (fallback when real thinking is not enabled or not requested)
 		let needsThinkingClose = false;
-		if (isThinkingModel && isFakeThinkingEnabled) {
+		if (isThinkingModel && isFakeThinkingEnabled && !includeReasoning) {
 			yield* this.generateReasoningOutput(modelId, messages, streamThinkingAsContent);
 			needsThinkingClose = streamThinkingAsContent; // Only need to close if we streamed as content
 		}
@@ -254,14 +297,16 @@ export class GeminiApiClient {
 			project: projectId,
 			request: {
 				contents: contents,
-				generationConfig: {
-					temperature: 0.7,
-					maxOutputTokens: 8192
-				}
+				generationConfig
 			}
 		};
 
-		yield* this.performStreamRequest(streamRequest, needsThinkingClose);
+		yield* this.performStreamRequest(
+			streamRequest,
+			needsThinkingClose,
+			false,
+			includeReasoning && streamThinkingAsContent
+		);
 	}
 
 	/**
@@ -366,7 +411,8 @@ export class GeminiApiClient {
 	private async *performStreamRequest(
 		streamRequest: unknown,
 		needsThinkingClose: boolean = false,
-		isRetry: boolean = false
+		isRetry: boolean = false,
+		realThinkingAsContent: boolean = false
 	): AsyncGenerator<StreamChunk> {
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
 			method: "POST",
@@ -382,7 +428,7 @@ export class GeminiApiClient {
 				console.log("Got 401 error in stream request, clearing token cache and retrying...");
 				await this.authManager.clearTokenCache();
 				await this.authManager.initializeAuth();
-				yield* this.performStreamRequest(streamRequest, needsThinkingClose, true); // Retry once
+				yield* this.performStreamRequest(streamRequest, needsThinkingClose, true, realThinkingAsContent); // Retry once
 				return;
 			}
 			const errorText = await response.text();
@@ -395,21 +441,103 @@ export class GeminiApiClient {
 		}
 
 		let hasClosedThinking = false;
+		let hasStartedThinking = false;
+
 		for await (const jsonData of this.parseSSEStream(response.body)) {
 			const candidate = jsonData.response?.candidates?.[0];
-			if (candidate?.content?.parts?.[0]?.text) {
-				const content = candidate.content.parts[0].text;
 
-				// Close thinking tag before first real content if needed
-				if (needsThinkingClose && !hasClosedThinking) {
-					yield {
-						type: "thinking_content",
-						data: "\n</thinking>\n\n"
-					};
-					hasClosedThinking = true;
+			if (candidate?.content?.parts) {
+				for (const part of candidate.content.parts as GeminiPart[]) {
+					// Handle real thinking content from Gemini
+					if (part.thought === true && part.text) {
+						const thinkingText = part.text;
+
+						if (realThinkingAsContent) {
+							// Stream as content with <thinking> tags (DeepSeek R1 style)
+							if (!hasStartedThinking) {
+								yield {
+									type: "thinking_content",
+									data: "<thinking>\n"
+								};
+								hasStartedThinking = true;
+							}
+
+							yield {
+								type: "thinking_content",
+								data: thinkingText
+							};
+						} else {
+							// Stream as separate reasoning field
+							yield {
+								type: "real_thinking",
+								data: thinkingText
+							};
+						}
+					}
+					// Check if text content contains <think> tags (based on your original example)
+					else if (part.text && part.text.includes("<think>")) {
+						if (realThinkingAsContent) {
+							// Extract thinking content and convert to our format
+							const thinkingMatch = part.text.match(/<think>(.*?)<\/think>/s);
+							if (thinkingMatch) {
+								if (!hasStartedThinking) {
+									yield {
+										type: "thinking_content",
+										data: "<thinking>\n"
+									};
+									hasStartedThinking = true;
+								}
+
+								yield {
+									type: "thinking_content",
+									data: thinkingMatch[1]
+								};
+							}
+
+							// Extract any non-thinking coRecentent
+							const nonThinkingContent = part.text.replace(/<think>.*?<\/think>/gs, "").trim();
+							if (nonThinkingContent) {
+								if (hasStartedThinking && !hasClosedThinking) {
+									yield {
+										type: "thinking_content",
+										data: "\n</thinking>\n\n"
+									};
+									hasClosedThinking = true;
+								}
+								yield { type: "text", data: nonThinkingContent };
+							}
+						} else {
+							// Stream thinking as separate reasoning field
+							const thinkingMatch = part.text.match(/<think>(.*?)<\/think>/s);
+							if (thinkingMatch) {
+								yield {
+									type: "real_thinking",
+									data: thinkingMatch[1]
+								};
+							}
+
+							// Stream non-thinking content as regular text
+							const nonThinkingContent = part.text.replace(/<think>.*?<\/think>/gs, "").trim();
+							if (nonThinkingContent) {
+								yield { type: "text", data: nonThinkingContent };
+							}
+						}
+					}
+					// Handle regular content - only if it's not a thinking part and doesn't contain <think> tags
+					else if (part.text && !part.thought && !part.text.includes("<think>")) {
+						// Close thinking tag before first real content if needed
+						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
+							yield {
+								type: "thinking_content",
+								data: "\n</thinking>\n\n"
+							};
+							hasClosedThinking = true;
+						}
+
+						yield { type: "text", data: part.text };
+					}
+					// Note: Skipping unknown part structures
 				}
-
-				yield { type: "text", data: content };
 			}
 
 			if (jsonData.response?.usageMetadata) {
@@ -432,13 +560,17 @@ export class GeminiApiClient {
 	async getCompletion(
 		modelId: string,
 		systemPrompt: string,
-		messages: ChatMessage[]
+		messages: ChatMessage[],
+		options?: {
+			includeReasoning?: boolean;
+			thinkingBudget?: number;
+		}
 	): Promise<{ content: string; usage?: UsageData }> {
 		let content = "";
 		let usage: UsageData | undefined;
 
 		// Collect all chunks from the stream
-		for await (const chunk of this.streamContent(modelId, systemPrompt, messages)) {
+		for await (const chunk of this.streamContent(modelId, systemPrompt, messages, options)) {
 			if (chunk.type === "text" && typeof chunk.data === "string") {
 				content += chunk.data;
 			} else if (chunk.type === "usage" && typeof chunk.data === "object") {
