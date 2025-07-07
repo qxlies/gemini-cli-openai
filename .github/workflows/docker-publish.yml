@@ -1,8 +1,5 @@
 name: Create and publish Docker image
 
-permissions:
-  contents: read
-
 on:
   workflow_dispatch: # Manual trigger
   push:
