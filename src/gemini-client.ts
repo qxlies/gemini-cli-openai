@@ -1,16 +1,10 @@
 import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
-import {
-	REASONING_MESSAGES,
-	REASONING_CHUNK_DELAY,
-	THINKING_CONTENT_CHUNK_SIZE,
-	DEFAULT_THINKING_BUDGET,
-	DISABLED_THINKING_BUDGET,
-	DEFAULT_TEMPERATURE
-} from "./constants";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
+import { GenerationConfigValidator } from "./helpers/generation-config-validator";
 
 // Gemini API response types
 interface GeminiCandidate {
@@ -260,30 +254,13 @@ export class GeminiApiClient {
 		const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
 		const includeReasoning = options?.includeReasoning || false;
 
-		// Build generation config
-		const generationConfig: Record<string, unknown> = {
-			temperature: DEFAULT_TEMPERATURE
-		};
-
-		// Configure thinking based on the documentation:
-		// 2.5 Flash and Pro models have thinking enabled by default
-		// Key discovery: includeThoughts: true is required to receive thinking content in the response
-		if (isThinkingModel) {
-			if (isRealThinkingEnabled && includeReasoning) {
-				// Enable thinking with custom budget (default -1 means dynamic allocation)
-				generationConfig.thinkingConfig = {
-					thinkingBudget: options?.thinkingBudget ?? DEFAULT_THINKING_BUDGET,
-					includeThoughts: true // Critical: This enables thinking content in response
-				};
-				console.log("Real thinking enabled with budget:", options?.thinkingBudget ?? DEFAULT_THINKING_BUDGET);
-			} else {
-				// Disable thinking by setting budget to 0
-				generationConfig.thinkingConfig = {
-					thinkingBudget: DISABLED_THINKING_BUDGET,
-					includeThoughts: false
-				};
-			}
-		}
+		// Use the validation helper to create a proper generation config
+		const generationConfig = GenerationConfigValidator.createValidatedConfig(
+			modelId,
+			{ thinkingBudget: options?.thinkingBudget },
+			isRealThinkingEnabled,
+			includeReasoning
+		);
 
 		// For thinking models with fake thinking (fallback when real thinking is not enabled or not requested)
 		let needsThinkingClose = false;

@@ -27,6 +27,8 @@ src/
 ├── middlewares/      # Hono middleware
 │   ├── auth.ts      # Authentication middleware
 │   └── logging.ts   # Request logging middleware
+├── helpers/         # Helper classes and utilities
+│   └── generation-config-validator.ts # Model config validation
 ├── utils/           # Utility functions
 │   └── image-utils.ts # Image validation utilities
 ├── auth.ts          # OAuth2 authentication manager
