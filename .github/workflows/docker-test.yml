@@ -3,13 +3,6 @@ name: Docker Build Test
 on:
   pull_request:
     branches: [ "main" ]
-    paths:
-      - 'Dockerfile'
-      - 'docker-compose.yml'
-      - 'package.json'
-      - 'yarn.lock'
-      - '.dockerignore'
-      - '.github/workflows/docker-test.yml'
 
 jobs:
   docker-build-test:
