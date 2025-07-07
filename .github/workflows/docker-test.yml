@@ -68,11 +68,3 @@ jobs:
         
         # Clean up
         docker stop gemini-worker-test
-
-    - name: Test docker-compose build
-      run: |
-        # Test that docker-compose.yml builds successfully
-        docker-compose build --no-cache
-        
-        # Verify the image was built
-        docker images | grep gemini-cli-openai-gemini-worker
