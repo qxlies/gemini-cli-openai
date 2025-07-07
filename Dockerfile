@@ -1,22 +1,22 @@
 # Dockerfile for Gemini CLI OpenAI Worker
 # Production-ready build with security optimizations
 
-FROM node:20-alpine
+FROM node:20-slim
 
 # Install security updates and required packages
-RUN apk update && apk upgrade && \
-    apk add --no-cache wget curl && \
-    rm -rf /var/cache/apk/*
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y wget curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S worker -u 1001 -G nodejs
+RUN groupadd -g 1001 nodejs && \
+    useradd -r -u 1001 -g nodejs worker
 
 # Set working directory inside the container
 WORKDIR /app
 
 # Install wrangler globally
-# Yarn is already included in the Node.js Alpine image
 RUN npm install -g wrangler@4.23.0
 
 # Copy package files first to leverage Docker cache
@@ -34,9 +34,11 @@ RUN if [ "$NODE_ENV" = "production" ]; then \
 # Copy the rest of your application code
 COPY . .
 
-# Create directory for miniflare storage persistence and set proper ownership
+# Create directories for miniflare storage and wrangler logs, set proper ownership
 RUN mkdir -p .mf && \
-    chown -R worker:nodejs /app
+    mkdir -p /home/worker/.config/.wrangler/logs && \
+    chown -R worker:nodejs /app && \
+    chown -R worker:nodejs /home/worker
 
 # Switch to non-root user for security
 USER worker
