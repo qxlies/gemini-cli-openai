@@ -1,7 +1,7 @@
 import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
-import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE, AUTO_SWITCH_MODEL_MAP, RATE_LIMIT_STATUS_CODES } from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
 import { GenerationConfigValidator } from "./helpers/generation-config-validator";
@@ -282,7 +282,8 @@ export class GeminiApiClient {
 			streamRequest,
 			needsThinkingClose,
 			false,
-			includeReasoning && streamThinkingAsContent
+			includeReasoning && streamThinkingAsContent,
+			modelId
 		);
 	}
 
@@ -383,13 +384,14 @@ export class GeminiApiClient {
 	}
 
 	/**
-	 * Performs the actual stream request with retry logic for 401 errors.
+	 * Performs the actual stream request with retry logic for 401 errors and auto model switching for rate limits.
 	 */
 	private async *performStreamRequest(
 		streamRequest: unknown,
 		needsThinkingClose: boolean = false,
 		isRetry: boolean = false,
-		realThinkingAsContent: boolean = false
+		realThinkingAsContent: boolean = false,
+		originalModel?: string
 	): AsyncGenerator<StreamChunk> {
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
 			method: "POST",
@@ -405,9 +407,33 @@ export class GeminiApiClient {
 				console.log("Got 401 error in stream request, clearing token cache and retrying...");
 				await this.authManager.clearTokenCache();
 				await this.authManager.initializeAuth();
-				yield* this.performStreamRequest(streamRequest, needsThinkingClose, true, realThinkingAsContent); // Retry once
+				yield* this.performStreamRequest(streamRequest, needsThinkingClose, true, realThinkingAsContent, originalModel); // Retry once
 				return;
 			}
+			
+			// Handle rate limiting with auto model switching
+			if ((RATE_LIMIT_STATUS_CODES as readonly number[]).includes(response.status) && !isRetry && originalModel) {
+				const fallbackModel = this.getFallbackModel(originalModel);
+				if (fallbackModel && this.isAutoModelSwitchingEnabled()) {
+					console.log(`Got ${response.status} error for model ${originalModel}, switching to fallback model: ${fallbackModel}`);
+					
+					// Create new request with fallback model
+					const fallbackRequest = {
+						...(streamRequest as Record<string, unknown>),
+						model: fallbackModel
+					};
+					
+					// Add a notification chunk about the model switch
+					yield {
+						type: "text",
+						data: `[Auto-switched from ${originalModel} to ${fallbackModel} due to rate limiting]\n\n`
+					};
+					
+					yield* this.performStreamRequest(fallbackRequest, needsThinkingClose, true, realThinkingAsContent, originalModel);
+					return;
+				}
+			}
+			
 			const errorText = await response.text();
 			console.error(`[GeminiAPI] Stream request failed: ${response.status}`, errorText);
 			throw new Error(`Stream request failed: ${response.status}`);
@@ -543,19 +569,64 @@ export class GeminiApiClient {
 			thinkingBudget?: number;
 		}
 	): Promise<{ content: string; usage?: UsageData }> {
-		let content = "";
-		let usage: UsageData | undefined;
+		try {
+			let content = "";
+			let usage: UsageData | undefined;
 
-		// Collect all chunks from the stream
-		for await (const chunk of this.streamContent(modelId, systemPrompt, messages, options)) {
-			if (chunk.type === "text" && typeof chunk.data === "string") {
-				content += chunk.data;
-			} else if (chunk.type === "usage" && typeof chunk.data === "object") {
-				usage = chunk.data as UsageData;
+			// Collect all chunks from the stream
+			for await (const chunk of this.streamContent(modelId, systemPrompt, messages, options)) {
+				if (chunk.type === "text" && typeof chunk.data === "string") {
+					content += chunk.data;
+				} else if (chunk.type === "usage" && typeof chunk.data === "object") {
+					usage = chunk.data as UsageData;
+				}
+				// Skip reasoning chunks for non-streaming responses
 			}
-			// Skip reasoning chunks for non-streaming responses
-		}
 
-		return { content, usage };
+			return { content, usage };
+		} catch (error: unknown) {
+			// Handle rate limiting for non-streaming requests
+			if (error instanceof Error && (error.message.includes("Stream request failed: 429") || error.message.includes("Stream request failed: 503"))) {
+				const fallbackModel = this.getFallbackModel(modelId);
+				if (fallbackModel && this.isAutoModelSwitchingEnabled()) {
+					console.log(`Got rate limit error for model ${modelId}, switching to fallback model: ${fallbackModel}`);
+					
+					// Retry with fallback model
+					let content = "";
+					let usage: UsageData | undefined;
+					
+					// Add notification about model switch
+					content += `[Auto-switched from ${modelId} to ${fallbackModel} due to rate limiting]\n\n`;
+
+					// Collect all chunks from the stream with fallback model
+					for await (const chunk of this.streamContent(fallbackModel, systemPrompt, messages, options)) {
+						if (chunk.type === "text" && typeof chunk.data === "string") {
+							content += chunk.data;
+						} else if (chunk.type === "usage" && typeof chunk.data === "object") {
+							usage = chunk.data as UsageData;
+						}
+					}
+
+					return { content, usage };
+				}
+			}
+			
+			// Re-throw if not a rate limit error or fallback not available
+			throw error;
+		}
+	}
+
+	/**
+	 * Checks if auto model switching is enabled.
+	 */
+	private isAutoModelSwitchingEnabled(): boolean {
+		return this.env.ENABLE_AUTO_MODEL_SWITCHING === "true";
+	}
+
+	/**
+	 * Gets the fallback model for auto switching on rate limits.
+	 */
+	private getFallbackModel(originalModel: string): string | null {
+		return AUTO_SWITCH_MODEL_MAP[originalModel as keyof typeof AUTO_SWITCH_MODEL_MAP] || null;
 	}
 }
