@@ -27,5 +27,5 @@ ENABLE_REAL_THINKING=true
 # wrapped in <thinking></thinking> tags instead of using the reasoning field
 STREAM_THINKING_AS_CONTENT=true
 
-# Optional: Auto switch from Pro to flash when you are getting ratelimited
+# Optional: Auto switch from Pro to flash when you are getting rate-limited
 ENABLE_AUTO_MODEL_SWITCHING=true
