@@ -1,16 +1,11 @@
 import { Env, StreamChunk, ReasoningData, UsageData, ChatMessage, MessageContent } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
-import {
-	REASONING_MESSAGES,
-	REASONING_CHUNK_DELAY,
-	THINKING_CONTENT_CHUNK_SIZE,
-	AUTO_SWITCH_MODEL_MAP,
-	RATE_LIMIT_STATUS_CODES
-} from "./constants";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants";
 import { geminiCliModels } from "./models";
 import { validateImageUrl } from "./utils/image-utils";
 import { GenerationConfigValidator } from "./helpers/generation-config-validator";
+import { AutoModelSwitchingHelper } from "./helpers/auto-model-switching";
 
 // Gemini API response types
 interface GeminiCandidate {
@@ -72,10 +67,12 @@ export class GeminiApiClient {
 	private env: Env;
 	private authManager: AuthManager;
 	private projectId: string | null = null;
+	private autoSwitchHelper: AutoModelSwitchingHelper;
 
 	constructor(env: Env, authManager: AuthManager) {
 		this.env = env;
 		this.authManager = authManager;
+		this.autoSwitchHelper = new AutoModelSwitchingHelper(env);
 	}
 
 	/**
@@ -418,9 +415,9 @@ export class GeminiApiClient {
 			}
 
 			// Handle rate limiting with auto model switching
-			if (this.isRateLimitStatus(response.status) && !isRetry && originalModel) {
-				const fallbackModel = this.getFallbackModel(originalModel);
-				if (fallbackModel && this.isAutoModelSwitchingEnabled()) {
+			if (this.autoSwitchHelper.isRateLimitStatus(response.status) && !isRetry && originalModel) {
+				const fallbackModel = this.autoSwitchHelper.getFallbackModel(originalModel);
+				if (fallbackModel && this.autoSwitchHelper.isEnabled()) {
 					console.log(
 						`Got ${response.status} error for model ${originalModel}, switching to fallback model: ${fallbackModel}`
 					);
@@ -434,7 +431,7 @@ export class GeminiApiClient {
 					// Add a notification chunk about the model switch
 					yield {
 						type: "text",
-						data: `[Auto-switched from ${originalModel} to ${fallbackModel} due to rate limiting]\n\n`
+						data: this.autoSwitchHelper.createSwitchNotification(originalModel, fallbackModel)
 					};
 
 					yield* this.performStreamRequest(
@@ -600,8 +597,14 @@ export class GeminiApiClient {
 			return { content, usage };
 		} catch (error: unknown) {
 			// Handle rate limiting for non-streaming requests
-			if (this.isRateLimitError(error)) {
-				const fallbackResult = await this.handleRateLimitFallback(modelId, systemPrompt, messages, options);
+			if (this.autoSwitchHelper.isRateLimitError(error)) {
+				const fallbackResult = await this.autoSwitchHelper.handleNonStreamingFallback(
+					modelId,
+					systemPrompt,
+					messages,
+					options,
+					this.streamContent.bind(this)
+				);
 				if (fallbackResult) {
 					return fallbackResult;
 				}
@@ -610,73 +613,5 @@ export class GeminiApiClient {
 			// Re-throw if not a rate limit error or fallback not available
 			throw error;
 		}
-	}
-
-	/**
-	 * Checks if the error is a rate limit error that should trigger auto model switching.
-	 */
-	private isRateLimitError(error: unknown): boolean {
-		return (
-			error instanceof Error &&
-			(error.message.includes("Stream request failed: 429") || error.message.includes("Stream request failed: 503"))
-		);
-	}
-
-	/**
-	 * Checks if the HTTP status code indicates a rate limit error.
-	 */
-	private isRateLimitStatus(status: number): boolean {
-		return (RATE_LIMIT_STATUS_CODES as readonly number[]).includes(status);
-	}
-
-	/**
-	 * Handles rate limit fallback by retrying with a fallback model.
-	 */
-	private async handleRateLimitFallback(
-		originalModel: string,
-		systemPrompt: string,
-		messages: ChatMessage[],
-		options?: {
-			includeReasoning?: boolean;
-			thinkingBudget?: number;
-		}
-	): Promise<{ content: string; usage?: UsageData } | null> {
-		const fallbackModel = this.getFallbackModel(originalModel);
-		if (!fallbackModel || !this.isAutoModelSwitchingEnabled()) {
-			return null;
-		}
-
-		console.log(`Got rate limit error for model ${originalModel}, switching to fallback model: ${fallbackModel}`);
-
-		let content = "";
-		let usage: UsageData | undefined;
-
-		// Add notification about model switch
-		content += `[Auto-switched from ${originalModel} to ${fallbackModel} due to rate limiting]\n\n`;
-
-		// Collect all chunks from the stream with fallback model
-		for await (const chunk of this.streamContent(fallbackModel, systemPrompt, messages, options)) {
-			if (chunk.type === "text" && typeof chunk.data === "string") {
-				content += chunk.data;
-			} else if (chunk.type === "usage" && typeof chunk.data === "object") {
-				usage = chunk.data as UsageData;
-			}
-		}
-
-		return { content, usage };
-	}
-
-	/**
-	 * Checks if auto model switching is enabled.
-	 */
-	private isAutoModelSwitchingEnabled(): boolean {
-		return this.env.ENABLE_AUTO_MODEL_SWITCHING === "true";
-	}
-
-	/**
-	 * Gets the fallback model for auto switching on rate limits.
-	 */
-	private getFallbackModel(originalModel: string): string | null {
-		return AUTO_SWITCH_MODEL_MAP[originalModel as keyof typeof AUTO_SWITCH_MODEL_MAP] || null;
 	}
 }
