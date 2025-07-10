@@ -26,3 +26,6 @@ ENABLE_REAL_THINKING=true
 # When enabled along with either thinking mode, reasoning will be streamed as regular content
 # wrapped in <thinking></thinking> tags instead of using the reasoning field
 STREAM_THINKING_AS_CONTENT=true
+
+# Optional: Auto switch from Pro to flash when you are getting rate-limited
+ENABLE_AUTO_MODEL_SWITCHING=true
