@@ -330,26 +330,30 @@ export class GeminiApiClient {
 		const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
 		const includeReasoning = options?.includeReasoning || false;
 
+		const req = {
+			thinking_budget: options?.thinkingBudget,
+			tools: options?.tools,
+			tool_choice: options?.tool_choice,
+			max_tokens: options?.max_tokens,
+			temperature: options?.temperature,
+			top_p: options?.top_p,
+			stop: options?.stop,
+			presence_penalty: options?.presence_penalty,
+			frequency_penalty: options?.frequency_penalty,
+			seed: options?.seed,
+			response_format: options?.response_format
+		};
+
 		// Use the validation helper to create a proper generation config
 		const generationConfig = GenerationConfigValidator.createValidatedConfig(
 			modelId,
-			{
-				thinking_budget: options?.thinkingBudget,
-				tools: options?.tools,
-				tool_choice: options?.tool_choice,
-				max_tokens: options?.max_tokens,
-				temperature: options?.temperature,
-				top_p: options?.top_p,
-				stop: options?.stop,
-				presence_penalty: options?.presence_penalty,
-				frequency_penalty: options?.frequency_penalty,
-				seed: options?.seed,
-				response_format: options?.response_format
-			},
+			req,
 			isRealThinkingEnabled,
 			includeReasoning,
 			this.env
 		);
+
+		const { tools, toolConfig } = GenerationConfigValidator.createValidateTools(req);
 
 		// For thinking models with fake thinking (fallback when real thinking is not enabled or not requested)
 		let needsThinkingClose = false;
@@ -363,7 +367,9 @@ export class GeminiApiClient {
 			project: projectId,
 			request: {
 				contents: contents,
-				generationConfig
+				generationConfig,
+				tools: tools,
+				toolConfig
 			}
 		};
 
