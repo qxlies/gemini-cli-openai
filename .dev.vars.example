@@ -37,3 +37,35 @@ ENABLE_AUTO_MODEL_SWITCHING=true
 # GEMINI_MODERATION_HATE_SPEECH_THRESHOLD=BLOCK_NONE
 # GEMINI_MODERATION_SEXUALLY_EXPLICIT_THRESHOLD=BLOCK_NONE
 # GEMINI_MODERATION_DANGEROUS_CONTENT_THRESHOLD=BLOCK_NONE
+
+# --- Native Tools Configuration ---
+
+# Optional: Master switch to enable or disable all native Gemini tools (default: false)
+# ENABLE_GEMINI_NATIVE_TOOLS=true
+
+# Optional: Enable specific native tools (default: false)
+# ENABLE_GOOGLE_SEARCH=true
+# ENABLE_URL_CONTEXT=true
+
+# Optional: Tool priority strategy (native_first, custom_first, user_choice)
+# Determines which tools to use when both native and custom tools are available.
+# GEMINI_TOOLS_PRIORITY=native_first
+
+# Optional: Default behavior when no custom tools are provided in the request (default: true)
+# If true, native tools will be used by default.
+# DEFAULT_TO_NATIVE_TOOLS=true
+
+# Optional: Allow request-level tool control (default: true)
+# If true, allows request-level parameters to override environment settings for native tools.
+# ALLOW_REQUEST_TOOL_CONTROL=true
+
+# --- Citations and Grounding Configuration ---
+
+# Optional: Enable inline citations in responses (default: false)
+# ENABLE_INLINE_CITATIONS=true
+
+# Optional: Include grounding metadata in responses (default: true)
+# INCLUDE_GROUNDING_METADATA=true
+
+# Optional: Include search entry point HTML (default: false)
+# INCLUDE_SEARCH_ENTRY_POINT=false
