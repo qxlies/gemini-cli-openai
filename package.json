@@ -20,7 +20,8 @@
     "tsc": "tsc --noEmit --skipLibCheck"
   },
   "dependencies": {
-    "hono": "^4.9.2"
+    "hono": "^4.9.2",
+    "toucan-js": "^4.1.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250816.0",

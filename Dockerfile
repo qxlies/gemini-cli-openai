@@ -41,7 +41,7 @@ RUN mkdir -p .mf && \
     chown -R worker:nodejs /home/worker
 
 # Switch to non-root user for security
-USER worker
+# USER worker
 
 # Expose the port miniflare will run on
 EXPOSE 8787
