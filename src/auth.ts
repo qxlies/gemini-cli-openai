@@ -228,7 +228,7 @@ export class AuthManager {
 				}
 
 				// Quota error: switch to the next account and continue the loop
-				if (response.status === 429) {
+				if (response.status === 429 || response.status == 403) {
 					console.log(`Account ${this.currentAccountIndex} quota exceeded. Switching...`);
 					this.switchToNextAccount();
 					continue;

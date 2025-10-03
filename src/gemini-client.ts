@@ -495,7 +495,7 @@ export class GeminiApiClient {
                                         return;
                                 }
                                 // 429 — quota exceeded, switch account and retry (up to maxAccountTries)
-                                if (response.status === 429) {
+                                if (response.status === 429 || response.status == 403) {
                                         console.log(`[GeminiAPI] Stream request failed: 429 (quota exceeded). Switching account and retrying...`);
                                         (this.authManager as any).switchToNextAccount();
                                         await this.authManager.initializeAuth();
