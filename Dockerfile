@@ -24,7 +24,7 @@ RUN chown -R worker:nodejs /app
 USER worker
 
 # Expose the application port
-EXPOSE 3000
+EXPOSE 8787
 
 # The CMD will be overridden by docker-compose, but this is a good default
 CMD [ "npm", "run", "dev" ]
