@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import { Env } from "./types";
-import { OpenAIRoute } from "./routes/openai";
-import { DebugRoute } from "./routes/debug";
-import { openAIApiKeyAuth } from "./middlewares/auth";
-import { loggingMiddleware } from "./middlewares/logging";
+import { Env } from "./types.js";
+import { OpenAIRoute } from "./routes/openai.js";
+import { DebugRoute } from "./routes/debug.js";
+import { openAIApiKeyAuth } from "./middlewares/auth.js";
+import { loggingMiddleware } from "./middlewares/logging.js";
 
 /**
  * Gemini CLI OpenAI Worker

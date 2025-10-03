@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "start": "node dist/server.js",
+    "dev": "npm run build && npm run start",
+    "build": "tsc && cpx accounts.json dist",
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
-    "build": "wrangler deploy --dry-run --outdir=dist",
     "lint": "eslint --ext .ts src && npm run tsc",
     "lint:fix": "eslint --ext .ts src --fix",
     "docker:build": "docker-compose build",
@@ -20,6 +21,8 @@
     "tsc": "tsc --noEmit --skipLibCheck"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.5",
+    "dotenv": "^17.2.3",
     "hono": "^4.9.2",
     "toucan-js": "^4.1.1"
   },
@@ -27,11 +30,15 @@
     "@cloudflare/workers-types": "^4.20250816.0",
     "@eslint/eslintrc": "^3.3.1",
     "@eslint/js": "^9.32.0",
-    "@types/node": "^24.3.0",
+    "@types/node": "^24.6.2",
     "@typescript-eslint/eslint-plugin": "^8.39.1",
     "@typescript-eslint/parser": "^8.39.1",
+    "cpx": "^1.5.0",
     "eslint": "^9.33.0",
+    "nodemon": "^3.1.10",
     "prettier": "^3.6.2",
+    "ts-node": "^10.9.2",
+    "tsc-watch": "^7.2.0",
     "typescript": "^5.4.5",
     "wrangler": "^4.30.0"
   }

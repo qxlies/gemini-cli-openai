@@ -138,3 +138,7 @@ dist
 .wrangler/
 dev.vars
 vars.backup
+
+accounts.json
+
+.env

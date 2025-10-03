@@ -1,4 +1,6 @@
-import { Env, OAuth2Credentials } from "./types";
+import { Env, Account, OAuth2Credentials } from "./types.js";
+import * as fs from "fs/promises";
+import * as path from "path";
 import {
 	CODE_ASSIST_ENDPOINT,
 	CODE_ASSIST_API_VERSION,
@@ -6,8 +8,7 @@ import {
 	OAUTH_CLIENT_SECRET,
 	OAUTH_REFRESH_URL,
 	TOKEN_BUFFER_TIME,
-	KV_TOKEN_KEY
-} from "./config";
+} from "./config.js";
 
 // Auth-related interfaces
 interface TokenRefreshResponse {
@@ -37,53 +38,44 @@ interface TokenCacheInfo {
  */
 export class AuthManager {
 	private env: Env;
-	private accounts: OAuth2Credentials[] = [];
+	private accounts: Account[] = [];
 	private currentAccountIndex = 0;
 	private accessToken: string | null = null;
+	private tokenCache = new Map<string, CachedTokenData>();
 
-	constructor(env: Env) {
+	private constructor(env: Env) {
 		this.env = env;
-		this.loadAccounts();
 	}
 
-	/**
-	 * Loads accounts from environment variables.
-	 * Prioritizes GOOGLE_ACCOUNTS_JSON, falls back to GCP_SERVICE_ACCOUNT for backward compatibility.
-	 */
-	private loadAccounts(): void {
-		if (this.env.GOOGLE_ACCOUNTS_JSON) {
-			try {
-				const parsedAccounts = JSON.parse(this.env.GOOGLE_ACCOUNTS_JSON);
-				if (Array.isArray(parsedAccounts) && parsedAccounts.length > 0) {
-					this.accounts = parsedAccounts;
-					console.log(`Loaded ${this.accounts.length} Google accounts.`);
-					return;
-				}
-			} catch (e) {
-				throw new Error("Failed to parse GOOGLE_ACCOUNTS_JSON. Please ensure it's a valid JSON array.");
-			}
+	public static async create(env: Env): Promise<AuthManager> {
+		const authManager = new AuthManager(env);
+		await authManager.loadAccounts();
+		if (authManager.accounts.length === 0) {
+			// This will be caught by the caller, preventing the server from starting with no accounts.
+			throw new Error("Authentication failed: No Google accounts were loaded. Please check accounts.json.");
 		}
-
-		if (this.env.GCP_SERVICE_ACCOUNT) {
-			try {
-				this.accounts = [JSON.parse(this.env.GCP_SERVICE_ACCOUNT)];
-				console.log("Loaded 1 Google account from deprecated GCP_SERVICE_ACCOUNT.");
-				return;
-			} catch (e) {
-				throw new Error("Failed to parse GCP_SERVICE_ACCOUNT. Please ensure it's valid JSON.");
-			}
-		}
-
-		if (this.accounts.length === 0) {
-			throw new Error("No Google account credentials found. Please set GOOGLE_ACCOUNTS_JSON or GCP_SERVICE_ACCOUNT.");
-		}
+		return authManager;
 	}
 
-	/**
-	 * Gets the KV store key for the current account's token.
-	 */
-	private getKvTokenKey(): string {
-		return `${KV_TOKEN_KEY}_${this.currentAccountIndex}`;
+	private async loadAccounts(): Promise<void> {
+		try {
+			const accountsPath = path.join(process.cwd(), "accounts.json");
+			const accountsJson = await fs.readFile(accountsPath, "utf-8");
+			const parsedAccounts = JSON.parse(accountsJson);
+
+			if (Array.isArray(parsedAccounts) && parsedAccounts.length > 0) {
+				this.accounts = parsedAccounts;
+				console.log(`Loaded ${this.accounts.length} Google accounts from accounts.json.`);
+			} else {
+				console.warn("accounts.json is empty or not an array. No accounts loaded.");
+			}
+		} catch (error: any) {
+			if (error && error.code === "ENOENT") {
+				console.error(`ERROR: accounts.json not found. It should be in the root directory.`);
+			} else {
+				console.error("Failed to read or parse accounts.json:", error);
+			}
+		}
 	}
 
 	/**
@@ -98,8 +90,12 @@ export class AuthManager {
 	/**
 	 * Gets the current active account credentials.
 	 */
-	private getCurrentAccount(): OAuth2Credentials {
+	public getCurrentAccount(): Account {
 		return this.accounts[this.currentAccountIndex];
+	}
+
+	private getTokenCacheKey(): string {
+		return `account_${this.currentAccountIndex}`;
 	}
 
 	/**
@@ -112,10 +108,9 @@ export class AuthManager {
 		}
 
 		try {
-			// Try to get a cached token from KV storage
-			const kvKey = this.getKvTokenKey();
-			const cachedToken = await this.env.GEMINI_CLI_KV.get(kvKey, "json");
-			const cachedTokenData = cachedToken ? (cachedToken as CachedTokenData) : null;
+			// Try to get a cached token from local memory cache
+			const cacheKey = this.getTokenCacheKey();
+			const cachedTokenData = this.tokenCache.get(cacheKey);
 
 			// Check if cached token is still valid
 			if (cachedTokenData) {
@@ -127,15 +122,15 @@ export class AuthManager {
 			}
 
 			// Check if the original token from config is still valid
-			const timeUntilExpiry = (currentAccount.expiry_date || 0) - Date.now();
+			const timeUntilExpiry = (currentAccount.credentials.expiry_date || 0) - Date.now();
 			if (timeUntilExpiry > TOKEN_BUFFER_TIME) {
-				this.accessToken = currentAccount.access_token;
-				await this.cacheTokenInKV(currentAccount.access_token, currentAccount.expiry_date);
+				this.accessToken = currentAccount.credentials.access_token;
+				await this.cacheToken(currentAccount.credentials.access_token, currentAccount.credentials.expiry_date);
 				return;
 			}
 
 			// If all tokens are expired, refresh
-			await this.refreshAndCacheToken(currentAccount.refresh_token);
+			await this.refreshAndCacheToken(currentAccount.credentials.refresh_token);
 		} catch (e: unknown) {
 			const errorMessage = e instanceof Error ? e.message : String(e);
 			console.error(`Failed to initialize authentication for account ${this.currentAccountIndex}:`, e);
@@ -154,8 +149,8 @@ export class AuthManager {
 				client_id: OAUTH_CLIENT_ID,
 				client_secret: OAUTH_CLIENT_SECRET,
 				refresh_token: refreshToken,
-				grant_type: "refresh_token"
-			})
+				grant_type: "refresh_token",
+			}),
 		});
 
 		if (!refreshResponse.ok) {
@@ -167,52 +162,45 @@ export class AuthManager {
 		this.accessToken = refreshData.access_token;
 		const expiryTime = Date.now() + refreshData.expires_in * 1000;
 
-		await this.cacheTokenInKV(refreshData.access_token, expiryTime);
+		await this.cacheToken(refreshData.access_token, expiryTime);
 	}
 
 	/**
-	 * Caches the access token in KV storage for the current account.
+	 * Caches the access token in the local memory cache.
 	 */
-	private async cacheTokenInKV(accessToken: string, expiryDate: number): Promise<void> {
-		const kvKey = this.getKvTokenKey();
-		const tokenData = {
+	private async cacheToken(accessToken: string, expiryDate: number): Promise<void> {
+		const cacheKey = this.getTokenCacheKey();
+		const tokenData: CachedTokenData = {
 			access_token: accessToken,
 			expiry_date: expiryDate,
-			cached_at: Date.now()
+			cached_at: Date.now(),
 		};
-		const ttlSeconds = Math.floor((expiryDate - Date.now()) / 1000) - 300;
-
-		if (ttlSeconds > 0) {
-			await this.env.GEMINI_CLI_KV.put(kvKey, JSON.stringify(tokenData), {
-				expirationTtl: ttlSeconds
-			});
-		}
+		this.tokenCache.set(cacheKey, tokenData);
 	}
 
 	/**
 	 * Clears the cached token for the current account.
 	 */
 	public async clearTokenCache(): Promise<void> {
-		await this.env.GEMINI_CLI_KV.delete(this.getKvTokenKey());
+		this.tokenCache.delete(this.getTokenCacheKey());
 	}
 
 	/**
 	 * Gets cached token info for the current account.
 	 */
 	public async getCachedTokenInfo(): Promise<TokenCacheInfo> {
-		const cachedToken = await this.env.GEMINI_CLI_KV.get(this.getKvTokenKey(), "json");
-		if (!cachedToken) {
+		const tokenData = this.tokenCache.get(this.getTokenCacheKey());
+		if (!tokenData) {
 			return { cached: false, message: `No token found in cache for account ${this.currentAccountIndex}` };
 		}
 
-		const tokenData = cachedToken as CachedTokenData;
 		const timeUntilExpiry = tokenData.expiry_date - Date.now();
 		return {
 			cached: true,
 			cached_at: new Date(tokenData.cached_at).toISOString(),
 			expires_at: new Date(tokenData.expiry_date).toISOString(),
 			time_until_expiry_seconds: Math.floor(timeUntilExpiry / 1000),
-			is_expired: timeUntilExpiry < 0
+			is_expired: timeUntilExpiry < 0,
 		};
 	}
 
@@ -230,9 +218,9 @@ export class AuthManager {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
-						Authorization: `Bearer ${this.accessToken}`
+						Authorization: `Bearer ${this.accessToken}`,
 					},
-					body: JSON.stringify(body)
+					body: JSON.stringify(body),
 				});
 
 				if (response.ok) {
@@ -256,7 +244,7 @@ export class AuthManager {
 					const retryResponse = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`, {
 						method: "POST",
 						headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` },
-						body: JSON.stringify(body)
+						body: JSON.stringify(body),
 					});
 
 					if (retryResponse.ok) {

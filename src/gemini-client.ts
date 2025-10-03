@@ -8,17 +8,17 @@ import {
         Tool,
         ToolChoice,
         GeminiFunctionCall
-} from "./types";
-import { AuthManager } from "./auth";
-import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
-import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants";
-import { geminiCliModels } from "./models";
-import { validateImageUrl } from "./utils/image-utils";
-import { GenerationConfigValidator } from "./helpers/generation-config-validator";
-import { AutoModelSwitchingHelper } from "./helpers/auto-model-switching";
-import { NativeToolsManager } from "./helpers/native-tools-manager";
-import { CitationsProcessor } from "./helpers/citations-processor";
-import { GeminiUrlContextMetadata, GroundingMetadata, NativeToolsRequestParams } from "./types/native-tools";
+} from "./types.js";
+import { AuthManager } from "./auth.js";
+import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config.js";
+import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants.js";
+import { geminiCliModels } from "./models.js";
+import { validateImageUrl } from "./utils/image-utils.js";
+import { GenerationConfigValidator } from "./helpers/generation-config-validator.js";
+import { AutoModelSwitchingHelper } from "./helpers/auto-model-switching.js";
+import { NativeToolsManager } from "./helpers/native-tools-manager.js";
+import { CitationsProcessor } from "./helpers/citations-processor.js";
+import { GeminiUrlContextMetadata, GroundingMetadata, NativeToolsRequestParams } from "./types/native-tools.js";
 
 // Gemini API response types
 interface GeminiCandidate {
@@ -85,39 +85,46 @@ export class GeminiApiClient {
         private authManager: AuthManager;
         private projectId: string | null = null;
         private autoSwitchHelper: AutoModelSwitchingHelper;
-        constructor(env: Env, authManager: AuthManager) {
-                this.env = env;
-                this.authManager = authManager;
-                this.autoSwitchHelper = new AutoModelSwitchingHelper(env);
+        private constructor(env: Env, authManager: AuthManager) {
+        	this.env = env;
+        	this.authManager = authManager;
+        	this.autoSwitchHelper = new AutoModelSwitchingHelper(env);
+        }
+      
+        public static async create(env: Env): Promise<GeminiApiClient> {
+        	const authManager = await AuthManager.create(env);
+        	return new GeminiApiClient(env, authManager);
         }
         /**
          * Discovers the Google Cloud project ID. Uses the environment variable if provided.
          */
         public async discoverProjectId(): Promise<string> {
-                if (this.env.GEMINI_PROJECT_ID) {
-                        return this.env.GEMINI_PROJECT_ID;
-                }
-                if (this.projectId) {
-                        return this.projectId;
-                }
-                try {
-                        const initialProjectId = "default-project";
-                        const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", {
-                                cloudaicompanionProject: initialProjectId,
-                                metadata: { duetProject: initialProjectId }
-                        })) as ProjectDiscoveryResponse;
-                        if (loadResponse.cloudaicompanionProject) {
-                                this.projectId = loadResponse.cloudaicompanionProject;
-                                return loadResponse.cloudaicompanionProject;
-                        }
-                        throw new Error("Project ID discovery failed. Please set the GEMINI_PROJECT_ID environment variable.");
-                } catch (error: unknown) {
-                        const errorMessage = error instanceof Error ? error.message : String(error);
-                        console.error("Failed to discover project ID:", errorMessage);
-                        throw new Error(
-                                "Could not discover project ID. Make sure you're authenticated and consider setting GEMINI_PROJECT_ID."
-                        );
-                }
+        	const currentAccount = this.authManager.getCurrentAccount();
+        	if (currentAccount && currentAccount.project_id) {
+        		return currentAccount.project_id;
+        	}
+      
+        	if (this.projectId) {
+        		return this.projectId;
+        	}
+        	try {
+        		const initialProjectId = "default-project";
+        		const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", {
+        			cloudaicompanionProject: initialProjectId,
+        			metadata: { duetProject: initialProjectId }
+        		})) as ProjectDiscoveryResponse;
+        		if (loadResponse.cloudaicompanionProject) {
+        			this.projectId = loadResponse.cloudaicompanionProject;
+        			return loadResponse.cloudaicompanionProject;
+        		}
+        		throw new Error("Project ID discovery failed. Please set the GEMINI_PROJECT_ID environment variable.");
+        	} catch (error: unknown) {
+        		const errorMessage = error instanceof Error ? error.message : String(error);
+        		console.error("Failed to discover project ID:", errorMessage);
+        		throw new Error(
+        			"Could not discover project ID. Make sure you're authenticated and consider setting GEMINI_PROJECT_ID."
+        		);
+        	}
         }
         /**
          * Parses a server-sent event (SSE) stream from the Gemini API.
@@ -588,11 +595,7 @@ export class GeminiApiClient {
                                                 yield { type: "usage", data: usageData };
                                         }
                                 }
-                                // Finalize citations if any remain
-                                const finalCitations = citationsProcessor.finalize();
-                                if (finalCitations) {
-                                        yield { type: "text", data: finalCitations };
-                                }
+                                // Citations are processed chunk by chunk, no finalization needed.
                                 return; // If everything was successful, exit
                         }
                 }
@@ -687,24 +690,45 @@ export class GeminiApiClient {
                 };
         }
         private extractBooleanParam(options: Record<string, unknown> | undefined, key: string): boolean | undefined {
-                const value =
-                        options?.[key] ??
-                        (options?.extra_body as Record<string, unknown>)?.[key] ??
-                        (options?.model_params as Record<string, unknown>)?.[key];
-                return typeof value === "boolean" ? value : undefined;
+        	const upperCaseKey = key.toUpperCase() as keyof Env;
+        	const envValue = this.env[upperCaseKey];
+      
+        	const requestValue =
+        		options?.[key] ??
+        		(options?.extra_body as Record<string, unknown>)?.[key] ??
+        		(options?.model_params as Record<string, unknown>)?.[key];
+      
+        	if (typeof requestValue === "boolean") {
+        		return requestValue;
+        	}
+      
+        	if (typeof envValue === "string") {
+        		return envValue.toLowerCase() === "true";
+        	}
+      
+        	return undefined;
         }
         private extractStringParam<T extends string>(
-                options: Record<string, unknown> | undefined,
-                key: string,
-                guard: (v: string) => v is T
+        	options: Record<string, unknown> | undefined,
+        	key: string,
+        	guard: (v: string) => v is T
         ): T | undefined {
-                const value =
-                        options?.[key] ??
-                        (options?.extra_body as Record<string, unknown>)?.[key] ??
-                        (options?.model_params as Record<string, unknown>)?.[key];
-                if (typeof value === "string" && guard(value)) {
-                        return value;
-                }
-                return undefined;
+        	const upperCaseKey = key.toUpperCase() as keyof Env;
+        	const envValue = this.env[upperCaseKey];
+      
+        	const requestValue =
+        		options?.[key] ??
+        		(options?.extra_body as Record<string, unknown>)?.[key] ??
+        		(options?.model_params as Record<string, unknown>)?.[key];
+      
+        	if (typeof requestValue === "string" && guard(requestValue)) {
+        		return requestValue;
+        	}
+      
+        	if (typeof envValue === "string" && guard(envValue)) {
+        		return envValue;
+        	}
+      
+        	return undefined;
         }
 }

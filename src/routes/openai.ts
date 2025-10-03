@@ -1,11 +1,11 @@
 import { Hono } from "hono";
-import { Env, ChatCompletionRequest, ChatCompletionResponse } from "../types";
-import { geminiCliModels, DEFAULT_MODEL, getAllModelIds } from "../models";
-import { OPENAI_MODEL_OWNER } from "../config";
-import { DEFAULT_THINKING_BUDGET } from "../constants";
-import { AuthManager } from "../auth";
-import { GeminiApiClient } from "../gemini-client";
-import { createOpenAIStreamTransformer } from "../stream-transformer";
+import { Env, ChatCompletionRequest, ChatCompletionResponse } from "../types.js";
+import { geminiCliModels, DEFAULT_MODEL, getAllModelIds } from "../models.js";
+import { OPENAI_MODEL_OWNER } from "../config.js";
+import { DEFAULT_THINKING_BUDGET } from "../constants.js";
+import { AuthManager } from "../auth.js";
+import { GeminiApiClient } from "../gemini-client.js";
+import { createOpenAIStreamTransformer } from "../stream-transformer.js";
 
 /**
  * OpenAI-compatible API routes for models and chat completions.
@@ -141,18 +141,15 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			return true;
 		});
 
-		// Initialize services
-		const authManager = new AuthManager(c.env);
-		const geminiClient = new GeminiApiClient(c.env, authManager);
-
-		// Test authentication first
+		// Initialize services asynchronously
+		let geminiClient: GeminiApiClient;
 		try {
-			await authManager.initializeAuth();
-			console.log("Authentication successful");
-		} catch (authError: unknown) {
-			const errorMessage = authError instanceof Error ? authError.message : String(authError);
-			console.error("Authentication failed:", errorMessage);
-			return c.json({ error: "Authentication failed: " + errorMessage }, 401);
+			geminiClient = await GeminiApiClient.create(c.env);
+			console.log("Gemini client and auth manager initialized successfully.");
+		} catch (initError: unknown) {
+			const errorMessage = initError instanceof Error ? initError.message : String(initError);
+			console.error("Initialization failed:", errorMessage);
+			return c.json({ error: "Initialization failed: " + errorMessage }, 500);
 		}
 
 		if (stream) {
@@ -167,6 +164,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 				try {
 					console.log("Starting stream generation");
 					const geminiStream = geminiClient.streamContent(model, systemPrompt, otherMessages, {
+						...body, // Pass the whole body to include native tool flags
 						includeReasoning,
 						thinkingBudget,
 						tools,
@@ -208,6 +206,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			try {
 				console.log("Starting non-streaming completion");
 				const completion = await geminiClient.getCompletion(model, systemPrompt, otherMessages, {
+					...body, // Pass the whole body to include native tool flags
 					includeReasoning,
 					thinkingBudget,
 					tools,

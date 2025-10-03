@@ -1,4 +1,4 @@
-import { NativeToolResponse } from "./types/native-tools";
+import { NativeToolResponse } from "./types/native-tools.js";
 
 // --- Safety Threshold Types ---
 export type SafetyThreshold =
@@ -51,6 +51,11 @@ export interface OAuth2Credentials {
         token_type: string;
         id_token: string;
         expiry_date: number;
+}
+
+export interface Account {
+	project_id: string;
+	credentials: OAuth2Credentials;
 }
 
 // --- Model Information Interface ---
