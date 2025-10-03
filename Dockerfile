@@ -6,12 +6,16 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Copy package files and install all dependencies
+# Copy package files and other necessary root files
 COPY package*.json ./
+COPY accounts.json ./
+
+# Install all dependencies
 RUN npm install
 
 # Copy the rest of the application code
-COPY . .
+COPY src ./src
+COPY tsconfig.json ./
 
 # Build the TypeScript project
 RUN npm run build

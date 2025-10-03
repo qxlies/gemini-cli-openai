@@ -2,10 +2,14 @@
   "name": "gemini-cli-worker",
   "version": "1.0.0",
   "private": true,
+  "files": [
+    "dist",
+    "accounts.json"
+  ],
   "scripts": {
     "start": "node dist/server.js",
     "dev": "npm run build && npm run start",
-    "build": "tsc && cpx accounts.json dist",
+    "build": "tsc",
     "deploy": "wrangler deploy",
     "format": "prettier --write src",
     "format:check": "prettier --check src",
