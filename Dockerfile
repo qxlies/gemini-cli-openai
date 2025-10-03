@@ -40,11 +40,11 @@ RUN chown -R worker:nodejs /app
 USER worker
 
 # Expose the port the server will run on
-EXPOSE 3000
+EXPOSE 8787
 
 # Health check to ensure the service is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8787/health || exit 1
 
 # Command to run the worker
 CMD ["npm", "start"]
