@@ -1,44 +1,30 @@
-# Stage 1: Build the application
-FROM node:20-slim AS builder
-WORKDIR /app
-
-# Copy package.json and package-lock.json
-COPY package*.json ./
-
-# Install all dependencies (including dev)
-RUN npm install
-
-# Copy the rest of the application source code
-COPY . .
-
-# Build the project
-RUN npm run build
-
-# Stage 2: Create the production image
+# Dockerfile for Development Environment
 FROM node:20-slim
+
+# Set working directory
 WORKDIR /app
 
 # Create a non-root user for security
 RUN groupadd -g 1001 nodejs && \
     useradd -r -u 1001 -g nodejs worker
 
-# Copy only necessary files for production from the builder stage
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/accounts.json ./accounts.json
+# Copy package files
+COPY package*.json ./
 
-# Install production dependencies only (pruning dev dependencies)
-RUN npm prune --omit=dev
+# Install dependencies
+RUN npm install
 
-# Change ownership of the app directory
+# Copy the rest of the app for initial setup (will be overwritten by volume mount)
+COPY . .
+
+# Change ownership
 RUN chown -R worker:nodejs /app
 
-# Switch to the non-root user
+# Switch to non-root user
 USER worker
 
 # Expose the application port
 EXPOSE 3000
 
-# Command to run the application
-CMD [ "node", "dist/server.js" ]
+# The CMD will be overridden by docker-compose, but this is a good default
+CMD [ "npm", "run", "dev" ]

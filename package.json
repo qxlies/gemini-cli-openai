@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "npm run build && npm run start",
+    "dev:docker": "nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm src/server.ts' --legacy-watch",
     "build": "tsc",
     "deploy": "wrangler deploy",
     "format": "prettier --write src",
