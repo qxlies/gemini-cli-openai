@@ -8,13 +8,8 @@ services:
     container_name: gemini-cli-worker
     ports:
       - "8787:8787"
-    volumes:
-      - .:/app
-      - /app/node_modules
     env_file:
       - .env
-    # Простая команда запуска, без nodemon
-    command: npm run start
     restart: unless-stopped
     networks:
       - caddy_net
