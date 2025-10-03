@@ -7,7 +7,7 @@
     "accounts.json"
   ],
   "scripts": {
-    "start": "node dist/server.js",
+    "start": "node --loader ts-node/esm src/server.ts",
     "dev": "npm run build && npm run start",
     "build": "tsc",
     "deploy": "wrangler deploy",
