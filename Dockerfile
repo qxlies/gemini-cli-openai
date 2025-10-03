@@ -1,54 +1,38 @@
-# Dockerfile for Gemini CLI OpenAI Worker (Node.js version)
-# Production-ready multi-stage build
-
-# --- Builder Stage ---
+# Stage 1: Build the application
 FROM node:20-slim AS builder
-
 WORKDIR /app
 
-# Copy package files and other necessary root files
-COPY package*.json ./
-COPY accounts.json ./
+# Copy all source files
+COPY . .
 
-# Install all dependencies
+# Install dependencies and build the project
 RUN npm install
-
-# Copy the rest of the application code
-COPY src ./src
-COPY tsconfig.json ./
-
-# Build the TypeScript project
 RUN npm run build
 
-# --- Production Stage ---
+# Stage 2: Create the production image
 FROM node:20-slim
+WORKDIR /app
 
-# Create a non-root user for security
+# Create a non-root user
 RUN groupadd -g 1001 nodejs && \
     useradd -r -u 1001 -g nodejs worker
 
-WORKDIR /app
-
 # Copy only necessary files from the builder stage
 COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/accounts.json ./
+COPY --from=builder /app/dist ./dist/
+COPY --from=builder /app/accounts.json ./accounts.json
 
 # Install only production dependencies
 RUN npm install --omit=dev
 
-# Set ownership for the app directory
+# Change ownership of the app directory
 RUN chown -R worker:nodejs /app
 
 # Switch to the non-root user
 USER worker
 
-# Expose the port the server will run on
-EXPOSE 8787
+# Expose the application port
+EXPOSE 3000
 
-# Health check to ensure the service is running
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8787/health || exit 1
-
-# Command to run the worker
-CMD ["npm", "start"]
+# Command to run the application
+CMD [ "node", "dist/server.js" ]
