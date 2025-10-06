@@ -469,6 +469,18 @@ export class GeminiApiClient {
                 let attempt = 0;
                 let lastError: Error | null = null;
                 while (attempt < maxAccountTries) {
+                        // Ensure the request uses the current account's project on every attempt
+                        try {
+                                const currentProject = await this.discoverProjectId();
+                                if ((streamRequest as any)?.project !== currentProject) {
+                                        (streamRequest as any).project = currentProject;
+                                }
+                                // Debug which account/project we are using now
+                                const accIndex = (this.authManager as any).currentAccountIndex;
+                                console.log(`[GeminiAPI] Attempt ${attempt + 1}/${maxAccountTries} using account index ${accIndex}, project ${currentProject}`);
+                        } catch (e) {
+                                // If discovery fails, proceed; server will return a meaningful error below
+                        }
                         const citationsProcessor = new CitationsProcessor(this.env);
                         const url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`;
                         const dispatcher = await getProxyDispatcher(this.env as unknown as Record<string, unknown>, url);
