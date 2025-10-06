@@ -29,6 +29,12 @@ export interface Env {
         GEMINI_MODERATION_SEXUALLY_EXPLICIT_THRESHOLD?: SafetyThreshold;
         GEMINI_MODERATION_DANGEROUS_CONTENT_THRESHOLD?: SafetyThreshold;
 
+        // HTTP Proxy Configuration (Node runtime only)
+        HTTP_PROXY?: string;
+        HTTPS_PROXY?: string;
+        ALL_PROXY?: string;
+        NO_PROXY?: string;
+
         // Native Tools Configuration
         ENABLE_GEMINI_NATIVE_TOOLS?: string; // Enable native Gemini tools (default: false)
         ENABLE_GOOGLE_SEARCH?: string; // Enable Google Search tool (default: false)

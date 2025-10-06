@@ -10,7 +10,7 @@ import {
         GeminiFunctionCall
 } from "./types.js";
 import { AuthManager } from "./auth.js";
-import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config.js";
+import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION, getProxyDispatcher } from "./config.js";
 import { REASONING_MESSAGES, REASONING_CHUNK_DELAY, THINKING_CONTENT_CHUNK_SIZE } from "./constants.js";
 import { geminiCliModels } from "./models.js";
 import { validateImageUrl } from "./utils/image-utils.js";
@@ -470,17 +470,42 @@ export class GeminiApiClient {
                 let lastError: Error | null = null;
                 while (attempt < maxAccountTries) {
                         const citationsProcessor = new CitationsProcessor(this.env);
-                        const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
+                        const url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`;
+                        const dispatcher = await getProxyDispatcher(this.env as unknown as Record<string, unknown>, url);
+                        const response = await fetch(url, ({
                                 method: "POST",
                                 headers: {
                                         "Content-Type": "application/json",
                                         Authorization: `Bearer ${this.authManager.getAccessToken()}`
                                 },
-                                body: JSON.stringify(streamRequest)
-                        });
+                                body: JSON.stringify(streamRequest),
+                                dispatcher,
+                        }) as any);
                         if (!response.ok) {
+                                // Debug: capture headers/body for diagnostics
+                                const debugHeaders: Record<string, string> = {};
+                                for (const [k, v] of (response.headers as any).entries()) {
+                                        const key = String(k).toLowerCase();
+                                        if (
+                                                key === "retry-after" ||
+                                                key.startsWith("x-ratelimit") ||
+                                                key.startsWith("x-goog-quota") ||
+                                                key === "x-request-id" ||
+                                                key === "x-error-code" ||
+                                                key === "x-error-message"
+                                        ) {
+                                                debugHeaders[key] = String(v);
+                                        }
+                                }
                                 // 401 — refresh token and retry (once)
                                 if (response.status === 401 && !isRetry) {
+                                        const errText = await response.text().catch(() => "");
+                                        console.warn("[GeminiAPI] 401 on stream request", {
+                                                status: response.status,
+                                                statusText: response.statusText,
+                                                headers: debugHeaders,
+                                                body: errText?.slice(0, 4000)
+                                        });
                                         console.log("Got 401 error in stream request, clearing token cache and retrying...");
                                         await this.authManager.clearTokenCache();
                                         await this.authManager.initializeAuth();
@@ -496,6 +521,13 @@ export class GeminiApiClient {
                                 }
                                 // 429 — quota exceeded, switch account and retry (up to maxAccountTries)
                                 if (response.status === 429 || response.status == 403) {
+                                        const errText = await response.text().catch(() => "");
+                                        console.warn("[GeminiAPI] Quota/Forbidden on stream request", {
+                                                status: response.status,
+                                                statusText: response.statusText,
+                                                headers: debugHeaders,
+                                                body: errText?.slice(0, 4000)
+                                        });
                                         console.log(`[GeminiAPI] Stream request failed: 429 (quota exceeded). Switching account and retrying...`);
                                         (this.authManager as any).switchToNextAccount();
                                         await this.authManager.initializeAuth();
@@ -529,8 +561,11 @@ export class GeminiApiClient {
                                                 return;
                                         }
                                 }
-                                const errorText = await response.text();
-                                console.error(`[GeminiAPI] Stream request failed: ${response.status}`, errorText);
+                                const errorText = await response.text().catch(() => "");
+                                console.error(`[GeminiAPI] Stream request failed: ${response.status} ${response.statusText}`, {
+                                        headers: debugHeaders,
+                                        body: errorText?.slice(0, 4000)
+                                });
                                 lastError = new Error(`Stream request failed: ${response.status}`);
                                 break; // For other errors, don't retry
                         } else {

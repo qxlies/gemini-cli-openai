@@ -8,6 +8,7 @@ import {
 	OAUTH_CLIENT_SECRET,
 	OAUTH_REFRESH_URL,
 	TOKEN_BUFFER_TIME,
+	getProxyDispatcher,
 } from "./config.js";
 
 // Auth-related interfaces
@@ -142,7 +143,8 @@ export class AuthManager {
 	 * Refreshes the OAuth token and caches it.
 	 */
 	private async refreshAndCacheToken(refreshToken: string): Promise<void> {
-		const refreshResponse = await fetch(OAUTH_REFRESH_URL, {
+		const dispatcher = await getProxyDispatcher(this.env as unknown as Record<string, unknown>, OAUTH_REFRESH_URL);
+		const refreshResponse = await fetch(OAUTH_REFRESH_URL, ({
 			method: "POST",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
@@ -151,11 +153,25 @@ export class AuthManager {
 				refresh_token: refreshToken,
 				grant_type: "refresh_token",
 			}),
-		});
+			dispatcher,
+		}) as any);
 
 		if (!refreshResponse.ok) {
-			const errorText = await refreshResponse.text();
-			throw new Error(`Token refresh failed for account ${this.currentAccountIndex}: ${errorText}`);
+			const debugHeaders: Record<string, string> = {};
+			for (const [k, v] of (refreshResponse.headers as any).entries()) {
+				const key = String(k).toLowerCase();
+				if (key === "retry-after" || key.startsWith("x-ratelimit") || key.startsWith("x-goog-quota") || key === "x-request-id") {
+					debugHeaders[key] = String(v);
+				}
+			}
+			const errorText = await refreshResponse.text().catch(() => "");
+			console.error("[Auth] Token refresh failed", {
+				status: refreshResponse.status,
+				statusText: refreshResponse.statusText,
+				headers: debugHeaders,
+				body: errorText?.slice(0, 4000),
+			});
+			throw new Error(`Token refresh failed for account ${this.currentAccountIndex}: ${refreshResponse.status}`);
 		}
 
 		const refreshData = (await refreshResponse.json()) as TokenRefreshResponse;
@@ -214,14 +230,17 @@ export class AuthManager {
 			try {
 				await this.initializeAuth();
 
-				const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`, {
+				const endpointUrl = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`;
+				const dispatcher = await getProxyDispatcher(this.env as unknown as Record<string, unknown>, endpointUrl);
+				const response = await fetch(endpointUrl, ({
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
 						Authorization: `Bearer ${this.accessToken}`,
 					},
 					body: JSON.stringify(body),
-				});
+					dispatcher,
+				}) as any);
 
 				if (response.ok) {
 					return response.json(); // Success
@@ -236,16 +255,33 @@ export class AuthManager {
 
 				// Auth error: try to refresh the token and retry ONCE for the same account
 				if (response.status === 401) {
+					const debugHeaders: Record<string, string> = {};
+					for (const [k, v] of (response.headers as any).entries()) {
+						const key = String(k).toLowerCase();
+						if (key === "retry-after" || key.startsWith("x-ratelimit") || key.startsWith("x-goog-quota") || key === "x-request-id") {
+							debugHeaders[key] = String(v);
+						}
+					}
+					const errText = await response.text().catch(() => "");
+					console.warn("[Auth] 401 on callEndpoint", {
+						status: response.status,
+						statusText: response.statusText,
+						headers: debugHeaders,
+						body: errText?.slice(0, 2000),
+					});
 					console.log(`Account ${this.currentAccountIndex} auth token expired. Refreshing and retrying...`);
 					this.accessToken = null;
 					await this.clearTokenCache();
 					await this.initializeAuth(); // This will refresh
 
-					const retryResponse = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`, {
+					const retryEndpointUrl = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`;
+					const retryDispatcher = await getProxyDispatcher(this.env as unknown as Record<string, unknown>, retryEndpointUrl);
+					const retryResponse = await fetch(retryEndpointUrl, ({
 						method: "POST",
 						headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.accessToken}` },
 						body: JSON.stringify(body),
-					});
+						dispatcher: retryDispatcher,
+					}) as any);
 
 					if (retryResponse.ok) {
 						return retryResponse.json(); // Success on retry
@@ -253,8 +289,28 @@ export class AuthManager {
 				}
 
 				// For any other persistent error with this account, throw to be caught and trigger switch
-				const errorText = await response.text();
-				throw new Error(`API call failed with status ${response.status}: ${errorText}`);
+				const debugHeaders2: Record<string, string> = {};
+				for (const [k, v] of (response.headers as any).entries()) {
+					const key = String(k).toLowerCase();
+					if (
+						key === "retry-after" ||
+						key.startsWith("x-ratelimit") ||
+						key.startsWith("x-goog-quota") ||
+						key === "x-request-id" ||
+						key === "x-error-code" ||
+						key === "x-error-message"
+					) {
+						debugHeaders2[key] = String(v);
+					}
+				}
+				const errorText = await response.text().catch(() => "");
+				console.error("[Auth] API call failed", {
+					status: response.status,
+					statusText: response.statusText,
+					headers: debugHeaders2,
+					body: errorText?.slice(0, 4000),
+				});
+				throw new Error(`API call failed with status ${response.status}`);
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : String(error);
 				console.error(`An error occurred with account ${this.currentAccountIndex}: ${errorMessage}. Switching to next account.`);
