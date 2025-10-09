@@ -51,7 +51,7 @@ export const geminiCliModels: Record<string, ModelInfo> = {
 		outputPrice: 0,
 		description: "Google's Gemini Flash Lite model via OAuth (free tier)",
 		thinking: true
-	},
+	}
 };
 
 // --- Default Model ---
