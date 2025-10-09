@@ -31,7 +31,27 @@ export const geminiCliModels: Record<string, ModelInfo> = {
 		outputPrice: 0,
 		description: "Google's Gemini 2.5 Flash Lite model via OAuth (free tier)",
 		thinking: true
-	}
+	},
+	"gemini-flash-latest": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Google's Gemini Flash model via OAuth (free tier)",
+		thinking: true
+	},
+	"gemini-flash-lite-latest": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Google's Gemini Flash Lite model via OAuth (free tier)",
+		thinking: true
+	},
 };
 
 // --- Default Model ---
