@@ -343,7 +343,6 @@ export class GeminiApiClient {
                 const streamRequest: {
                         model: string;
                         project: string;
-                        assistSession: string;
                         request: {
                                 contents: unknown;
                                 generationConfig: unknown;
@@ -354,7 +353,6 @@ export class GeminiApiClient {
                 } = {
                         model: modelId,
                         project: projectId,
-                        assistSession: crypto.randomUUID(),
                         request: {
                                 contents: contents,
                                 generationConfig,
