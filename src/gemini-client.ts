@@ -296,9 +296,9 @@ export class GeminiApiClient {
                 await this.authManager.initializeAuth();
                 const projectId = await this.discoverProjectId();
                 const contents = messages.map((msg) => this.messageToGeminiFormat(msg));
-                if (systemPrompt) {
-                        contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
-                }
+                // Do not inject system prompt as a user message to avoid cross-request leakage.
+                // Instead, pass it via systemInstruction which is scoped to this single request.
+                const systemInstruction = systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined;
                 // Check if this is a thinking model and which thinking mode to use
                 const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
                 const isRealThinkingEnabled = this.env.ENABLE_REAL_THINKING === "true";
@@ -354,6 +354,7 @@ export class GeminiApiClient {
                         model: modelId,
                         project: projectId,
                         request: {
+                                ...(systemInstruction ? { systemInstruction } : {}),
                                 contents: contents,
                                 generationConfig,
                                 tools: tools,
