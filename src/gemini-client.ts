@@ -294,17 +294,11 @@ export class GeminiApiClient {
                 } & NativeToolsRequestParams
         ): AsyncGenerator<StreamChunk> {
                 await this.authManager.initializeAuth();
-                // Allow per-request project override to avoid any shared context across a single project
-                const overrideProjectId =
-                        this.extractStringParam(options as Record<string, unknown>, "gemini_project_id", (v): v is string => typeof v === "string") ??
-                        this.extractStringParam(options as Record<string, unknown>, "project_id", (v): v is string => typeof v === "string");
-                const projectId = overrideProjectId || (await this.discoverProjectId());
+                const projectId = await this.discoverProjectId();
                 const contents = messages.map((msg) => this.messageToGeminiFormat(msg));
-                // Use dedicated systemInstruction field instead of injecting into contents to avoid backend
-                // conversation memory retaining previous system prompts across requests.
-                const systemInstruction = systemPrompt
-                        ? ({ role: "system", parts: [{ text: systemPrompt }] } as GeminiFormattedMessage)
-                        : undefined;
+                if (systemPrompt) {
+                        contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
+                }
                 // Check if this is a thinking model and which thinking mode to use
                 const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
                 const isRealThinkingEnabled = this.env.ENABLE_REAL_THINKING === "true";
@@ -354,7 +348,6 @@ export class GeminiApiClient {
                                 generationConfig: unknown;
                                 tools: unknown;
                                 toolConfig: unknown;
-                                systemInstruction?: unknown;
                                 safetySettings?: unknown;
                         };
                 } = {
@@ -364,18 +357,13 @@ export class GeminiApiClient {
                                 contents: contents,
                                 generationConfig,
                                 tools: tools,
-                                toolConfig: finalToolConfig,
-                                ...(systemInstruction ? { systemInstruction } : {})
+                                toolConfig: finalToolConfig
                         }
                 };
                 const safetySettings = GenerationConfigValidator.createSafetySettings(this.env);
                 if (safetySettings.length > 0) {
                         streamRequest.request.safetySettings = safetySettings;
                 }
-                // Lightweight diagnostics to verify isolation per request
-                console.log(
-                        `[GeminiAPI] Prepared stream request model=${modelId} project=${projectId} sys=${!!systemInstruction} contents=${contents.length}`
-                );
                 yield* this.performStreamRequest(
                         streamRequest,
                         needsThinkingClose,
