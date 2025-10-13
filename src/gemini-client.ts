@@ -291,6 +291,8 @@ export class GeminiApiClient {
                         response_format?: {
                                 type: "text" | "json_object";
                         };
+                        force_thinking?: boolean;
+                        force_thinking_as_content?: boolean;
                 } & NativeToolsRequestParams
         ): AsyncGenerator<StreamChunk> {
                 await this.authManager.initializeAuth();
@@ -301,10 +303,21 @@ export class GeminiApiClient {
                 }
                 // Check if this is a thinking model and which thinking mode to use
                 const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
-                const isRealThinkingEnabled = this.env.ENABLE_REAL_THINKING === "true";
-                const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
-                const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
-                const includeReasoning = options?.includeReasoning || false;
+
+                // Forced thinking flags from request (e.g., model suffix "-thinking")
+                const forceThinking =
+                        this.extractBooleanParam(options as Record<string, unknown> | undefined, "force_thinking") === true;
+                const forceThinkingAsContent =
+                        this.extractBooleanParam(options as Record<string, unknown> | undefined, "force_thinking_as_content") === true;
+
+                // Effective flags (forced flags override env)
+                const isRealThinkingEnabled = forceThinking || this.env.ENABLE_REAL_THINKING === "true";
+                const isFakeThinkingEnabled = forceThinking || this.env.ENABLE_FAKE_THINKING === "true";
+                const streamThinkingAsContent =
+                        forceThinkingAsContent || forceThinking || this.env.STREAM_THINKING_AS_CONTENT === "true";
+
+                // Always include reasoning when forced
+                const includeReasoning = forceThinking ? true : options?.includeReasoning || false;
                 const req = {
                         thinking_budget: options?.thinkingBudget,
                         tools: options?.tools,
@@ -399,7 +412,7 @@ export class GeminiApiClient {
                         // DeepSeek R1 style: stream thinking as content with <thinking> tags
                         yield {
                                 type: "thinking_content",
-                                data: "<thinking>\n"
+                                data: "<think>\n"
                         };
                         // Add a small delay after opening tag
                         await new Promise((resolve) => setTimeout(resolve, REASONING_CHUNK_DELAY)); // Stream reasoning content in smaller chunks for more realistic streaming
@@ -596,7 +609,7 @@ export class GeminiApiClient {
                                                                 const thinkingText = part.text;
                                                                 if (realThinkingAsContent) {
                                                                         if (!hasStartedThinking) {
-                                                                                yield { type: "thinking_content", data: "<thinking>\n" };
+                                                                                yield { type: "thinking_content", data: "<think>\n" };
                                                                                 hasStartedThinking = true;
                                                                         }
                                                                         yield { type: "thinking_content", data: thinkingText };
@@ -607,7 +620,7 @@ export class GeminiApiClient {
                                                         // Handle regular text content
                                                         else if (part.text) {
                                                                 if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
-                                                                        yield { type: "thinking_content", data: "\n</thinking>\n\n" };
+                                                                        yield { type: "thinking_content", data: "\n</think>\n\n" };
                                                                         hasClosedThinking = true;
                                                                 }
                                                                 let processedText = part.text;
@@ -622,7 +635,7 @@ export class GeminiApiClient {
                                                         // Handle function calls from Gemini
                                                         else if (part.functionCall) {
                                                                 if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
-                                                                        yield { type: "thinking_content", data: "\n</thinking>\n\n" };
+                                                                        yield { type: "thinking_content", data: "\n</think>\n\n" };
                                                                         hasClosedThinking = true;
                                                                 }
                                                                 const functionCallData: GeminiFunctionCall = {
@@ -672,6 +685,8 @@ export class GeminiApiClient {
                         response_format?: {
                                 type: "text" | "json_object";
                         };
+                        force_thinking?: boolean;
+                        force_thinking_as_content?: boolean;
                 } & NativeToolsRequestParams
         ): Promise<{
                 content: string;
@@ -682,9 +697,21 @@ export class GeminiApiClient {
                         let content = "";
                         let usage: UsageData | undefined;
                         const tool_calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = [];
+                        let hasManualThinkOpen = false; // for real_thinking path when not streamed as content
+
                         // Collect all chunks from the stream
                         for await (const chunk of this.streamContent(modelId, systemPrompt, messages, options)) {
                                 if (chunk.type === "text" && typeof chunk.data === "string") {
+                                        content += chunk.data;
+                                } else if (chunk.type === "thinking_content" && typeof chunk.data === "string") {
+                                        // Stream thinking as content (<think>...</think> comes from generator/stream)
+                                        content += chunk.data;
+                                } else if (chunk.type === "real_thinking" && typeof chunk.data === "string") {
+                                        // Wrap real thinking into <think> tags for non-streaming responses
+                                        if (!hasManualThinkOpen) {
+                                                content += "<think>\n";
+                                                hasManualThinkOpen = true;
+                                        }
                                         content += chunk.data;
                                 } else if (chunk.type === "usage" && typeof chunk.data === "object") {
                                         usage = chunk.data as UsageData;
@@ -699,8 +726,14 @@ export class GeminiApiClient {
                                                 }
                                         });
                                 }
-                                // Skip reasoning chunks for non-streaming responses
+                                // Skip legacy reasoning chunks for non-streaming responses
                         }
+
+                        // Close manual think tag if opened
+                        if (hasManualThinkOpen) {
+                                content += "\n</think>\n\n";
+                        }
+
                         return {
                                 content,
                                 usage,

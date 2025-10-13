@@ -32,7 +32,15 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 	try {
 		console.log("Chat completions request received");
 		const body = await c.req.json<ChatCompletionRequest>();
-		const model = body.model || DEFAULT_MODEL;
+
+		// Support "-thinking" suffix to force thinking mode and <think> streaming
+		const requestedModel = body.model || DEFAULT_MODEL;
+		const THINKING_SUFFIX = "-thinking";
+		const hasThinkingSuffix = requestedModel.endsWith(THINKING_SUFFIX);
+		const effectiveModel = hasThinkingSuffix ? requestedModel.slice(0, -THINKING_SUFFIX.length) : requestedModel;
+		const forceThinking = hasThinkingSuffix;
+		const forceThinkingAsContent = hasThinkingSuffix;
+
 		const messages = body.messages || [];
 		// OpenAI API compatibility: stream defaults to true unless explicitly set to false
 		const stream = body.stream !== false;
@@ -59,7 +67,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			body.reasoning_effort || body.extra_body?.reasoning_effort || body.model_params?.reasoning_effort;
 		if (reasoning_effort) {
 			includeReasoning = true; // Effort implies reasoning
-			const isFlashModel = model.includes("flash");
+			const isFlashModel = effectiveModel.includes("flash");
 			switch (reasoning_effort) {
 				case "low":
 					thinkingBudget = 1024;
@@ -81,7 +89,10 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const tool_choice = body.tool_choice;
 
 		console.log("Request body parsed:", {
-			model,
+			requestedModel,
+			effectiveModel,
+			forceThinking,
+			forceThinkingAsContent,
 			messageCount: messages.length,
 			stream,
 			includeReasoning,
@@ -94,11 +105,11 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			return c.json({ error: "messages is a required field" }, 400);
 		}
 
-		// Validate model
-		if (!(model in geminiCliModels)) {
+		// Validate base model (supporting "-thinking" suffix)
+		if (!(effectiveModel in geminiCliModels)) {
 			return c.json(
 				{
-					error: `Model '${model}' not found. Available models: ${getAllModelIds().join(", ")}`
+					error: `Model '${requestedModel}' not found. Available models: ${getAllModelIds().join(", ")}`
 				},
 				400
 			);
@@ -112,10 +123,10 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			return false;
 		});
 
-		if (hasImages && !geminiCliModels[model].supportsImages) {
+		if (hasImages && !geminiCliModels[effectiveModel].supportsImages) {
 			return c.json(
 				{
-					error: `Model '${model}' does not support image inputs. Please use a vision-capable model like gemini-2.5-pro or gemini-2.5-flash.`
+					error: `Model '${requestedModel}' does not support image inputs. Please use a vision-capable model like gemini-2.5-pro or gemini-2.5-flash.`
 				},
 				400
 			);
@@ -156,20 +167,23 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			// Streaming response
 			const { readable, writable } = new TransformStream();
 			const writer = writable.getWriter();
-			const openAITransformer = createOpenAIStreamTransformer(model);
+			const openAITransformer = createOpenAIStreamTransformer(requestedModel);
 			const openAIStream = readable.pipeThrough(openAITransformer);
 
 			// Asynchronously pipe data from Gemini to transformer
 			(async () => {
 				try {
 					console.log("Starting stream generation");
-					const geminiStream = geminiClient.streamContent(model, systemPrompt, otherMessages, {
+					const geminiStream = geminiClient.streamContent(effectiveModel, systemPrompt, otherMessages, {
 						...body, // Pass the whole body to include native tool flags
-						includeReasoning,
+						includeReasoning: includeReasoning || forceThinking, // force when "-thinking" suffix used
 						thinkingBudget,
 						tools,
 						tool_choice,
-						...generationOptions
+						...generationOptions,
+						// Force thinking behavior regardless of env when "-thinking" suffix used
+						force_thinking: forceThinking,
+						force_thinking_as_content: forceThinkingAsContent
 					});
 
 					for await (const chunk of geminiStream) {
@@ -205,20 +219,23 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			// Non-streaming response
 			try {
 				console.log("Starting non-streaming completion");
-				const completion = await geminiClient.getCompletion(model, systemPrompt, otherMessages, {
+				const completion = await geminiClient.getCompletion(effectiveModel, systemPrompt, otherMessages, {
 					...body, // Pass the whole body to include native tool flags
-					includeReasoning,
+					includeReasoning: includeReasoning || forceThinking, // force when "-thinking" suffix used
 					thinkingBudget,
 					tools,
 					tool_choice,
-					...generationOptions
+					...generationOptions,
+					// Force thinking behavior regardless of env when "-thinking" suffix used
+					force_thinking: forceThinking,
+					force_thinking_as_content: forceThinkingAsContent
 				});
 
 				const response: ChatCompletionResponse = {
 					id: `chatcmpl-${crypto.randomUUID()}`,
 					object: "chat.completion",
 					created: Math.floor(Date.now() / 1000),
-					model: model,
+					model: requestedModel,
 					choices: [
 						{
 							index: 0,
