@@ -314,7 +314,7 @@ export class GeminiApiClient {
                 const isRealThinkingEnabled = forceThinking || this.env.ENABLE_REAL_THINKING === "true";
                 const isFakeThinkingEnabled = forceThinking || this.env.ENABLE_FAKE_THINKING === "true";
                 const streamThinkingAsContent =
-                        forceThinkingAsContent || forceThinking || this.env.STREAM_THINKING_AS_CONTENT === "true";
+                        forceThinkingAsContent || forceThinking;
 
                 // Always include reasoning when forced
                 const includeReasoning = forceThinking ? true : options?.includeReasoning || false;
