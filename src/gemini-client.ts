@@ -703,16 +703,16 @@ export class GeminiApiClient {
                         for await (const chunk of this.streamContent(modelId, systemPrompt, messages, options)) {
                                 if (chunk.type === "text" && typeof chunk.data === "string") {
                                         content += chunk.data;
-                                } else if (chunk.type === "thinking_content" && typeof chunk.data === "string") {
-                                        // Stream thinking as content (<think>...</think> comes from generator/stream)
-                                        content += chunk.data;
-                                } else if (chunk.type === "real_thinking" && typeof chunk.data === "string") {
-                                        // Wrap real thinking into <think> tags for non-streaming responses
-                                        if (!hasManualThinkOpen) {
-                                                content += "<think>\n";
-                                                hasManualThinkOpen = true;
-                                        }
-                                        content += chunk.data;
+                                // } else if (chunk.type === "thinking_content" && typeof chunk.data === "string") {
+                                //         // Stream thinking as content (<think>...</think> comes from generator/stream)
+                                //         content += chunk.data;
+                                // } else if (chunk.type === "real_thinking" && typeof chunk.data === "string") {
+                                //         // Wrap real thinking into <think> tags for non-streaming responses
+                                //         if (!hasManualThinkOpen) {
+                                //                 content += "<think>\n";
+                                //                 hasManualThinkOpen = true;
+                                //         }
+                                //         content += chunk.data;
                                 } else if (chunk.type === "usage" && typeof chunk.data === "object") {
                                         usage = chunk.data as UsageData;
                                 } else if (chunk.type === "tool_code" && typeof chunk.data === "object") {
