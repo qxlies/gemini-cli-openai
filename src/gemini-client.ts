@@ -497,14 +497,21 @@ export class GeminiApiClient {
                         const citationsProcessor = new CitationsProcessor(this.env);
                         const url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`;
                         const dispatcher = await getProxyDispatcher(this.env as unknown as Record<string, unknown>, url);
+                        
+                        if (dispatcher) {
+                        	console.log("[GeminiAPI] Stream request will be routed through proxy");
+                        } else {
+                        	console.log("[GeminiAPI] Stream request will be sent directly (no proxy)");
+                        }
+                        
                         const response = await fetch(url, ({
-                                method: "POST",
-                                headers: {
-                                        "Content-Type": "application/json",
-                                        Authorization: `Bearer ${this.authManager.getAccessToken()}`
-                                },
-                                body: JSON.stringify(streamRequest),
-                                dispatcher,
+                        	method: "POST",
+                        	headers: {
+                        		"Content-Type": "application/json",
+                        		Authorization: `Bearer ${this.authManager.getAccessToken()}`
+                        	},
+                        	body: JSON.stringify(streamRequest),
+                        	dispatcher,
                         }) as any);
                         if (!response.ok) {
                                 // Debug: capture headers/body for diagnostics

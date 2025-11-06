@@ -21,39 +21,55 @@ export const OPENAI_MODEL_OWNER = "google-gemini-cli";
  * This is a no-op on non-Node runtimes (e.g., Cloudflare Workers).
  */
 export async function getProxyDispatcher(env: Record<string, unknown>, targetUrl: string): Promise<any | undefined> {
-        // Only attempt in Node.js
-        const isNode = typeof process !== "undefined" && !!(process as any).versions?.node;
-        if (!isNode) return undefined;
+	// Only attempt in Node.js
+	const isNode = typeof process !== "undefined" && !!(process as any).versions?.node;
+	if (!isNode) {
+		console.log("[Proxy] Not running in Node.js environment, proxy disabled");
+		return undefined;
+	}
 
-        try {
-                // Resolve proxy and no_proxy from env or process.env
-                const envStr = (k: string) => {
-                        const v = (env?.[k as keyof typeof env] as string | undefined) || (process.env[k] as string | undefined);
-                        return typeof v === "string" && v.trim() ? v.trim() : undefined;
-                };
+	try {
+		// Resolve proxy and no_proxy from env or process.env
+		const envStr = (k: string) => {
+			const v = (env?.[k as keyof typeof env] as string | undefined) || (process.env[k] as string | undefined);
+			return typeof v === "string" && v.trim() ? v.trim() : undefined;
+		};
 
-                const urlObj = new URL(targetUrl);
-                const isHttps = urlObj.protocol === "https:";
-                const noProxy = envStr("NO_PROXY") || envStr("no_proxy");
+		const urlObj = new URL(targetUrl);
+		const isHttps = urlObj.protocol === "https:";
+		const noProxy = envStr("NO_PROXY") || envStr("no_proxy");
 
-                if (noProxy && shouldBypassProxy(urlObj.hostname, noProxy)) {
-                        return undefined;
-                }
+		if (noProxy && shouldBypassProxy(urlObj.hostname, noProxy)) {
+			console.log(`[Proxy] Bypassing proxy for host: ${urlObj.hostname} (matched NO_PROXY rules)`);
+			return undefined;
+		}
 
-                // Prefer protocol-specific, then ALL_PROXY
-                const proxyUrl = (isHttps ? envStr("HTTPS_PROXY") || envStr("https_proxy") : envStr("HTTP_PROXY") || envStr("http_proxy"))
-                        || envStr("ALL_PROXY")
-                        || envStr("all_proxy");
+		// Prefer protocol-specific, then ALL_PROXY
+		const proxyUrl = (isHttps ? envStr("HTTPS_PROXY") || envStr("https_proxy") : envStr("HTTP_PROXY") || envStr("http_proxy"))
+			|| envStr("ALL_PROXY")
+			|| envStr("all_proxy");
 
-                if (!proxyUrl) return undefined;
+		if (!proxyUrl) {
+			console.log("[Proxy] No proxy configured in environment variables");
+			return undefined;
+		}
 
-                // Dynamically import undici to avoid bundling/worker issues
-                const undici: any = await import("undici");
-                if (!undici?.ProxyAgent) return undefined;
-                return new undici.ProxyAgent(proxyUrl);
-        } catch {
-                return undefined;
-        }
+		// Dynamically import undici to avoid bundling/worker issues
+		const undici: any = await import("undici");
+		if (!undici?.ProxyAgent) {
+			console.warn("[Proxy] undici.ProxyAgent not available");
+			return undefined;
+		}
+
+		// Mask password in logs for security
+		const maskedProxyUrl = proxyUrl.replace(/(:\/\/)([^:]+):([^@]+)@/, "$1$2:***@");
+		console.log(`[Proxy] Using proxy for ${targetUrl}: ${maskedProxyUrl}`);
+		
+		return new undici.ProxyAgent(proxyUrl);
+	} catch (error) {
+		console.error("[Proxy] Error creating proxy dispatcher:", error instanceof Error ? error.message : String(error));
+		return undefined;
+	}
 }
 
 function shouldBypassProxy(hostname: string, noProxyList: string): boolean {
